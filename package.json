@@ -9,11 +9,6 @@
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "puppeteer"
-    ]
-  },
   "dependencies": {
     "dotenv": "^16.4.5",
     "puppeteer": "^24.0.0",
