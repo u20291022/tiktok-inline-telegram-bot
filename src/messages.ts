@@ -32,6 +32,8 @@ export const messages: Record<
     helpText: string;
     loadingTitle: string;
     loadingCaption: string;
+    inlineLoadingCaption: string,
+    loadingCaptionWithoutEmoji: string,
     doneCaption: string;
     openInTikTok: string;
     errorUnavailable: string;
@@ -54,6 +56,8 @@ export const messages: Record<
       "To download a TikTok video, type the bot username followed by a TikTok link.",
     loadingTitle: "Send TikTok video",
     loadingCaption: `${emoji(EMOJI.loading, "🥳")} Loading video, it will appear here in a few seconds…`,
+    inlineLoadingCaption: `Tap here to start loading your video!`,
+    loadingCaptionWithoutEmoji: `Loading video, it will appear here in a few seconds…`,
     doneCaption: `${emoji(EMOJI.success, "🙌")} Here's your video!`,
     openInTikTok: "Open in TikTok",
     errorUnavailable: `${emoji(EMOJI.error, "❌")} Couldn't get this video. It may be private, deleted or region-locked.`,
@@ -76,6 +80,8 @@ export const messages: Record<
       "Чтобы скачать видео из TikTok, введите имя бота и ссылку на видео.",
     loadingTitle: "Отправить видео из TikTok",
     loadingCaption: `${emoji(EMOJI.loading, "🥳")} Загружаю видео, оно появится здесь через несколько секунд…`,
+    inlineLoadingCaption: `Нажмите сюда, чтобы загрузить видео!`,
+    loadingCaptionWithoutEmoji: `Загружаю видео, оно появится здесь через несколько секунд…`,
     doneCaption: `${emoji(EMOJI.success, "🙌")} Ваше видео готово!`,
     openInTikTok: "Открыть в TikTok",
     errorUnavailable: `${emoji(EMOJI.error, "❌")} Не удалось получить это видео. Возможно, оно приватное, удалено или недоступно в регионе.`,
