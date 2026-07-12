@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Input, Telegraf, Telegram, TelegramError } from "telegraf";
 import type { User } from "telegraf/types";
-import { messages, pickLang } from "./messages";
+import { escapeHtml, messages, pickLang } from "./messages";
 import {
   extractTikTokUrl,
   ParsedVideo,
@@ -17,6 +17,7 @@ const PLACEHOLDER_IMG =
 interface CacheEntry {
   fileId: string;
   title: string;
+  /** HTML-escaped; language-neutral part (description + author) */
   caption: string;
 }
 
@@ -28,22 +29,26 @@ function resultId(url: string): string {
 }
 
 function buildCacheEntry(video: ParsedVideo, fileId: string): CacheEntry {
-  const desc = video.description.trim();
+  // truncate before escaping so an HTML entity is never cut in half
+  const desc = video.description.trim().slice(0, 900);
   const author = video.author ? `@${video.author}` : "";
   return {
     fileId,
     title: desc.slice(0, 60) || `TikTok ${author}`.trim(),
-    caption: [desc, author && `👤 ${author}`]
+    caption: [escapeHtml(desc), author && `👤 ${escapeHtml(author)}`]
       .filter(Boolean)
-      .join("\n\n")
-      .slice(0, 1024),
+      .join("\n\n"),
   };
+}
+
+function videoCaption(doneCaption: string, entry: CacheEntry): string {
+  return [doneCaption, entry.caption].filter(Boolean).join("\n\n");
 }
 
 export function setupBot(bot: Telegraf, parser: TikTokParser): void {
   bot.start(async (ctx) => {
     const m = messages[pickLang(ctx.from.language_code)];
-    await ctx.reply(m.start(ctx.botInfo.username));
+    await ctx.reply(m.start(ctx.botInfo.username), { parse_mode: "HTML" });
   });
 
   bot.on("inline_query", async (ctx) => {
@@ -76,7 +81,8 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
             id: resultId(url),
             video_file_id: cached.fileId,
             title: cached.title,
-            caption: cached.caption,
+            caption: videoCaption(m.doneCaption, cached),
+            parse_mode: "HTML",
           },
         ],
         { cache_time: 0 },
@@ -100,6 +106,7 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
           photo_height: 1280,
           title: m.loadingTitle,
           caption: m.loadingCaption,
+          parse_mode: "HTML",
           reply_markup: {
             inline_keyboard: [[{ text: m.openInTikTok, url }]],
           },
@@ -174,7 +181,8 @@ async function deliverVideo(
     await telegram.editMessageMedia(undefined, undefined, inlineMessageId, {
       type: "video",
       media: entry.fileId,
-      caption: entry.caption,
+      caption: videoCaption(m.doneCaption, entry),
+      parse_mode: "HTML",
     });
   } catch (err) {
     console.error(`[bot] failed to deliver ${url}:`, err);
@@ -187,7 +195,9 @@ async function deliverVideo(
     }
     // the placeholder is a photo message, so update its caption
     await telegram
-      .editMessageCaption(undefined, undefined, inlineMessageId, text)
+      .editMessageCaption(undefined, undefined, inlineMessageId, text, {
+        parse_mode: "HTML",
+      })
       .catch(() => {});
   }
 }

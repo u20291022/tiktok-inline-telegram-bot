@@ -4,6 +4,25 @@ export function pickLang(languageCode?: string): Lang {
   return languageCode?.toLowerCase().startsWith("ru") ? "ru" : "en";
 }
 
+/** All outgoing texts use HTML parse mode; escape anything user-generated. */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+const EMOJI = {
+  wave: "5967683261940372267",
+  loading: "5967726903103067244",
+  success: "5969721610469380841",
+  error: "5967619945532494648",
+} as const;
+
+function emoji(id: (typeof EMOJI)[keyof typeof EMOJI], fallback: string): string {
+  return `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>`;
+}
+
 export const messages: Record<
   Lang,
   {
@@ -13,6 +32,7 @@ export const messages: Record<
     helpText: string;
     loadingTitle: string;
     loadingCaption: string;
+    doneCaption: string;
     openInTikTok: string;
     errorUnavailable: string;
     errorParse: string;
@@ -21,8 +41,8 @@ export const messages: Record<
 > = {
   en: {
     start: (botUsername) =>
-      "👋 This bot works in inline mode only — it cannot send videos here in direct messages.\n\n" +
-      `In any chat, type:\n@${botUsername} <TikTok link>\n\n` +
+      `${emoji(EMOJI.wave, "👋")} This bot works in inline mode only — it cannot send videos here in direct messages.\n\n` +
+      `In any chat, type:\n@${botUsername} &lt;TikTok link&gt;\n\n` +
       "…then tap the result to send the video.\n\n" +
       "Supported links:\n" +
       "• vt.tiktok.com/…\n" +
@@ -33,19 +53,18 @@ export const messages: Record<
     helpText:
       "To download a TikTok video, type the bot username followed by a TikTok link.",
     loadingTitle: "Send TikTok video",
-    loadingCaption: "⏳ Loading video, it will appear here in a few seconds…",
+    loadingCaption: `${emoji(EMOJI.loading, "🥳")} Loading video, it will appear here in a few seconds…`,
+    doneCaption: `${emoji(EMOJI.success, "🙌")} Here's your video!`,
     openInTikTok: "Open in TikTok",
-    errorUnavailable:
-      "😔 Couldn't get this video. It may be private, deleted or region-locked.",
-    errorParse:
-      "⚠️ Failed to download this video. Please try again in a minute.",
+    errorUnavailable: `${emoji(EMOJI.error, "❌")} Couldn't get this video. It may be private, deleted or region-locked.`,
+    errorParse: `${emoji(EMOJI.error, "❌")} Failed to download this video. Please try again in a minute.`,
     errorNeedStart: (botUsername) =>
-      `⚠️ I need you to start me first so I can process videos.\nOpen @${botUsername}, press Start, then send the link again.`,
+      `${emoji(EMOJI.error, "❌")} I need you to start me first so I can process videos.\nOpen @${botUsername}, press Start, then send the link again.`,
   },
   ru: {
     start: (botUsername) =>
-      "👋 Этот бот работает только в инлайн-режиме — он не может отправлять видео здесь, в личных сообщениях.\n\n" +
-      `В любом чате наберите:\n@${botUsername} <ссылка на TikTok>\n\n` +
+      `${emoji(EMOJI.wave, "👋")} Этот бот работает только в инлайн-режиме — он не может отправлять видео здесь, в личных сообщениях.\n\n` +
+      `В любом чате наберите:\n@${botUsername} &lt;ссылка на TikTok&gt;\n\n` +
       "…и нажмите на результат, чтобы отправить видео.\n\n" +
       "Поддерживаемые ссылки:\n" +
       "• vt.tiktok.com/…\n" +
@@ -56,13 +75,12 @@ export const messages: Record<
     helpText:
       "Чтобы скачать видео из TikTok, введите имя бота и ссылку на видео.",
     loadingTitle: "Отправить видео из TikTok",
-    loadingCaption: "⏳ Загружаю видео, оно появится здесь через несколько секунд…",
+    loadingCaption: `${emoji(EMOJI.loading, "🥳")} Загружаю видео, оно появится здесь через несколько секунд…`,
+    doneCaption: `${emoji(EMOJI.success, "🙌")} Ваше видео готово!`,
     openInTikTok: "Открыть в TikTok",
-    errorUnavailable:
-      "😔 Не удалось получить это видео. Возможно, оно приватное, удалено или недоступно в регионе.",
-    errorParse:
-      "⚠️ Не удалось скачать это видео. Попробуйте ещё раз через минуту.",
+    errorUnavailable: `${emoji(EMOJI.error, "❌")} Не удалось получить это видео. Возможно, оно приватное, удалено или недоступно в регионе.`,
+    errorParse: `${emoji(EMOJI.error, "❌")} Не удалось скачать это видео. Попробуйте ещё раз через минуту.`,
     errorNeedStart: (botUsername) =>
-      `⚠️ Сначала запустите бота, чтобы я мог обработать видео.\nОткройте @${botUsername}, нажмите Start и отправьте ссылку ещё раз.`,
+      `${emoji(EMOJI.error, "❌")} Сначала запустите бота, чтобы я мог обработать видео.\nОткройте @${botUsername}, нажмите Start и отправьте ссылку ещё раз.`,
   },
 };
