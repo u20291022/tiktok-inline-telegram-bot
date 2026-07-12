@@ -9,11 +9,6 @@ import {
   VideoUnavailableError,
 } from "./tiktok";
 
-// Telegram fetches this itself, so it must NOT be behind bot protection
-// (unlike TikTok's CDN). Shown until the real video replaces it.
-const PLACEHOLDER_IMG =
-  "https://placehold.co/720x1280/0f0f0f/ffffff.png?text=Loading...";
-
 interface CacheEntry {
   fileId: string;
   title: string;
@@ -35,7 +30,7 @@ function buildCacheEntry(video: ParsedVideo, fileId: string): CacheEntry {
   return {
     fileId,
     title: desc.slice(0, 60) || `TikTok ${author}`.trim(),
-    caption: [escapeHtml(desc), author && `👤 ${escapeHtml(author)}`]
+    caption: [escapeHtml(desc), author && `👤 <a href="https://www.tiktok.com/${author}">${escapeHtml(author)}</a>`]
       .filter(Boolean)
       .join("\n\n"),
   };
@@ -57,15 +52,7 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
 
     if (!url) {
       await ctx.answerInlineQuery(
-        [
-          {
-            type: "article",
-            id: "help",
-            title: m.helpTitle,
-            description: m.helpDescription,
-            input_message_content: { message_text: m.helpText },
-          },
-        ],
+        [],
         { cache_time: 30 },
       );
       return;
@@ -83,6 +70,13 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
             title: cached.title,
             caption: videoCaption(m.doneCaption, cached),
             parse_mode: "HTML",
+            // Without a reply_markup, Telegram omits inline_message_id and
+            // the sent caption's custom emoji never re-render (only
+            // edited messages get that). Attach the same button as the
+            // placeholder so chosen_inline_result can re-edit it below.
+            reply_markup: {
+              inline_keyboard: [[{ text: m.openInTikTok, url }]],
+            },
           },
         ],
         { cache_time: 0 },
@@ -98,15 +92,16 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
     await ctx.answerInlineQuery(
       [
         {
-          type: "photo",
+          type: "article",
           id: resultId(url),
-          photo_url: PLACEHOLDER_IMG,
-          thumbnail_url: PLACEHOLDER_IMG,
-          photo_width: 720,
-          photo_height: 1280,
           title: m.loadingTitle,
-          caption: m.loadingCaption,
-          parse_mode: "HTML",
+          description: m.inlineLoadingCaption,
+          input_message_content: {
+            message_text: m.loadingCaptionWithoutEmoji
+            // Send it without emoji first
+            // in "chosen_inline_result" bot will edit message
+            // so custom emoji can be shown
+          },
           reply_markup: {
             inline_keyboard: [[{ text: m.openInTikTok, url }]],
           },
@@ -116,12 +111,25 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
     );
   });
 
-  bot.on("chosen_inline_result", (ctx) => {
+  // Dont forget to enable /setinlinefeedback in BotFather
+  // or bot dont get "chosen_inline_result" updates
+  bot.on("chosen_inline_result", async (ctx) => {
     const { inline_message_id, query, from } = ctx.chosenInlineResult;
-    // No inline_message_id means a cached-video result was sent -- nothing to edit.
+    // Both result types attach a reply_markup so this is always present;
+    // guard anyway since Telegram's typing marks it optional.
+
     if (!inline_message_id) return;
     const url = extractTikTokUrl(query);
     if (!url) return;
+
+    // the placeholder is a photo message, so update its caption
+    const m = messages[pickLang(ctx.from.language_code)];
+    await ctx.editMessageCaption(m.loadingCaption, {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[{ text: m.openInTikTok, url }]],
+      },
+    }).catch(() => {});
 
     // Fire and forget: a 10-20s parse must not block other updates.
     void deliverVideo(
@@ -184,6 +192,11 @@ async function deliverVideo(
       caption: videoCaption(m.doneCaption, entry),
       parse_mode: "HTML",
     });
+    // Add "Open in TikTok button"
+    await telegram.editMessageReplyMarkup(undefined, undefined, inlineMessageId, {
+      inline_keyboard: [[{ text: m.openInTikTok, url }]],
+    })
+
   } catch (err) {
     console.error(`[bot] failed to deliver ${url}:`, err);
     let text = m.errorParse;
