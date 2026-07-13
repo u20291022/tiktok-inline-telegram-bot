@@ -49,9 +49,11 @@ export const messages: Record<
       "Supported links:\n" +
       "• vt.tiktok.com/…\n" +
       "• vm.tiktok.com/…\n" +
-      "• tiktok.com/@user/video/…",
+      "• tiktok.com/@user/video/…\n" +
+      "• tiktok.com/t/…",
     helpTitle: "Send me a TikTok link",
-    helpDescription: "vt.tiktok.com/… • vm.tiktok.com/… • tiktok.com/@user/video/…",
+    helpDescription:
+      "vt.tiktok.com/… • vm.tiktok.com/… • tiktok.com/@user/video/… • tiktok.com/t/…",
     helpText:
       "To download a TikTok video, type the bot username followed by a TikTok link.",
     loadingTitle: "Send TikTok video",
@@ -73,9 +75,11 @@ export const messages: Record<
       "Поддерживаемые ссылки:\n" +
       "• vt.tiktok.com/…\n" +
       "• vm.tiktok.com/…\n" +
-      "• tiktok.com/@user/video/…",
+      "• tiktok.com/@user/video/…\n" +
+      "• tiktok.com/t/…",
     helpTitle: "Отправьте ссылку на TikTok",
-    helpDescription: "vt.tiktok.com/… • vm.tiktok.com/… • tiktok.com/@user/video/…",
+    helpDescription:
+      "vt.tiktok.com/… • vm.tiktok.com/… • tiktok.com/@user/video/… • tiktok.com/t/…",
     helpText:
       "Чтобы скачать видео из TikTok, введите имя бота и ссылку на видео.",
     loadingTitle: "Отправить видео из TikTok",
