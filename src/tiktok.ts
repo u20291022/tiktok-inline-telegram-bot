@@ -1,8 +1,15 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import type { Browser, Page } from "puppeteer";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
 // TikTok's CDN sits behind Akamai bot detection that fingerprints the
 // TLS/HTTP2 handshake, so the video must be captured through a real
 // Chromium instance -- plain fetch()/curl gets a 403 there.
+//
+// TikTok's WAF (Slardar) additionally serves a JS challenge shell for
+// video-detail URLs, so the stealth plugin patches navigator.webdriver
+// and other automation fingerprints to get past it.
+puppeteer.use(StealthPlugin());
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
