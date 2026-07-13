@@ -19,6 +19,12 @@ const POOL_SIZE = 2; // max videos parsed in parallel; the rest queue up
 const NAV_TIMEOUT_MS = 30_000;
 const VIDEO_WAIT_MS = 20_000;
 
+/** Random delay (ms) so consecutive requests don't look mechanically regular. */
+function jitter(minMs = 1000, maxMs = 3000): Promise<void> {
+  const ms = minMs + Math.random() * (maxMs - minMs);
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 const TIKTOK_URL_RE =
   /(?:https?:\/\/)?(?:(?:vt|vm)\.tiktok\.com\/[\w.-]+|(?:www\.)?tiktok\.com\/@[\w.-]+\/video\/\d+)\/?/i;
 
@@ -130,6 +136,7 @@ export class TikTokParser {
 
     try {
       page.on("response", onResponse);
+      await jitter();
       await page.goto(url, {
         waitUntil: "domcontentloaded",
         timeout: NAV_TIMEOUT_MS,
