@@ -147,6 +147,7 @@ export class TikTokParser {
         });
         await jitter(1500, 3000);
         this.warmedUp = true;
+        console.warn("[tiktok] warm-up navigation done");
       }
 
       page.on("response", onResponse);
