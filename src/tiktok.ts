@@ -55,6 +55,7 @@ export class TikTokParser {
   private waiters: Array<(page: Page) => void> = [];
   private inflight = new Map<string, Promise<ParsedVideo>>();
   private closed = false;
+  private warmedUp = false;
 
   /** Parses and downloads a video; concurrent calls for the same URL share one job. */
   parse(url: string): Promise<ParsedVideo> {
@@ -90,6 +91,7 @@ export class TikTokParser {
       });
       this.freePages = [];
       this.pagesCreated = 0;
+      this.warmedUp = false;
     }
     return this.browser;
   }
@@ -135,6 +137,18 @@ export class TikTokParser {
     };
 
     try {
+      // Once per browser lifetime, warm up the session with a real
+      // homepage visit so the first video navigation carries some
+      // browsing history instead of going in cold.
+      if (!this.warmedUp) {
+        await page.goto("https://www.tiktok.com/", {
+          waitUntil: "domcontentloaded",
+          timeout: NAV_TIMEOUT_MS,
+        });
+        await jitter(1500, 3000);
+        this.warmedUp = true;
+      }
+
       page.on("response", onResponse);
       await jitter();
       await page.goto(url, {
