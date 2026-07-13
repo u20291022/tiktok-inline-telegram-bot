@@ -123,13 +123,20 @@ export class TikTokParser {
 
   private async doParse(url: string): Promise<ParsedVideo> {
     const page = await this.acquirePage();
-    let videoBuffer: Buffer | null = null;
+    // The detail page prefetches recommended/autoplay videos in the
+    // background, so several video/mp4 responses may arrive. Key each by its
+    // URL and pick the one that matches this video's own metadata later.
+    const capturedByUrl = new Map<string, Buffer>();
 
     const onResponse = async (res: import("puppeteer").HTTPResponse) => {
       const ct = res.headers()["content-type"] || "";
-      if (ct.includes("video/mp4") && res.status() === 200 && !videoBuffer) {
+      if (
+        ct.includes("video/mp4") &&
+        res.status() === 200 &&
+        !capturedByUrl.has(res.url())
+      ) {
         try {
-          videoBuffer = Buffer.from(await res.buffer());
+          capturedByUrl.set(res.url(), Buffer.from(await res.buffer()));
         } catch {
           // body already gone (duplicate/aborted request) -- ignore
         }
@@ -188,10 +195,34 @@ export class TikTokParser {
         );
       }
 
-      // wait for the video response to be captured
+      // The CDN URLs this video is actually served from, per its own metadata.
+      // A captured response only counts if its URL is one of these, otherwise
+      // it belongs to a prefetched recommendation, not the requested video.
+      const knownUrls = new Set<string>();
+      if (item.video?.playAddr) knownUrls.add(String(item.video.playAddr));
+      if (item.video?.downloadAddr)
+        knownUrls.add(String(item.video.downloadAddr));
+      for (const info of item.video?.bitrateInfo ?? []) {
+        for (const u of info?.PlayAddr?.UrlList ?? []) {
+          knownUrls.add(String(u));
+        }
+      }
+
+      const findMatch = (): Buffer | null => {
+        for (const u of knownUrls) {
+          const buf = capturedByUrl.get(u);
+          if (buf) return buf;
+        }
+        return null;
+      };
+
+      // The video response may have arrived before metadata was evaluated, so
+      // check immediately before falling into the same poll/deadline as before.
+      let videoBuffer = findMatch();
       const deadline = Date.now() + VIDEO_WAIT_MS;
       while (!videoBuffer && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 250));
+        videoBuffer = findMatch();
       }
       if (!videoBuffer) {
         throw new Error("Metadata resolved but no video response captured");
