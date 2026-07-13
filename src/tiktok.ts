@@ -140,6 +140,9 @@ export class TikTokParser {
       await page.goto(url, {
         waitUntil: "domcontentloaded",
         timeout: NAV_TIMEOUT_MS,
+        // Look like a visitor who arrived from tiktok.com rather than
+        // someone pasting a video URL cold.
+        referer: "https://www.tiktok.com/",
       });
 
       // Metadata is embedded in the page HTML regardless of the video request
