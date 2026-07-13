@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "xvfb": "xvfb-run -a --server-args='-screen 0 1920x1080x24' node dist/index.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
