@@ -73,6 +73,9 @@ export class TikTokParser {
     if (!this.browser || !this.browser.connected) {
       this.browser = await puppeteer.launch({
         headless: true,
+        // Persist cookies/localStorage across restarts so the browser
+        // accumulates session history like a real returning visitor.
+        userDataDir: "./puppeteer-profile",
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
