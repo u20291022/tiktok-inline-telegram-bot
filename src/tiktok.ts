@@ -154,6 +154,17 @@ export class TikTokParser {
       });
 
       if (!item) {
+        // Distinguish a WAF (Slardar) JS challenge from a genuinely
+        // missing video, for monitoring. The challenge shell is
+        // <html><head>...</head></html> with no real <body>, whereas a
+        // real video page is 300-500KB+. (Don't match "slardar" -- that
+        // SDK ships on legitimate pages too and gives false positives.)
+        const html = await page.content();
+        if (!html.includes("<body") || html.length < 5000) {
+          console.warn(`[tiktok] WAF challenge hit for ${url}`);
+        } else {
+          console.warn(`[tiktok] no embedded JSON (unknown cause) for ${url}`);
+        }
         throw new VideoUnavailableError(
           "No embedded video JSON -- video may be private/deleted/region-locked",
         );
