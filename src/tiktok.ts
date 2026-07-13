@@ -26,7 +26,7 @@ function jitter(minMs = 1000, maxMs = 3000): Promise<void> {
 }
 
 const TIKTOK_URL_RE =
-  /(?:https?:\/\/)?(?:(?:vt|vm)\.tiktok\.com\/[\w.-]+|(?:www\.)?tiktok\.com\/@[\w.-]+\/video\/\d+)\/?/i;
+  /(?:https?:\/\/)?(?:(?:vt|vm)\.tiktok\.com\/[\w.-]+|(?:www\.)?tiktok\.com\/(?:@[\w.-]+\/video\/\d+|t\/[\w.-]+))\/?/i;
 
 /** Finds a TikTok link in free-form text; returns a normalized https URL. */
 export function extractTikTokUrl(text: string): string | null {
