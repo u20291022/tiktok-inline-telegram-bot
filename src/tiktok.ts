@@ -200,9 +200,12 @@ export class TikTokParser {
         const html = await page.content();
         if (!html.includes("<body") || html.length < 5000) {
           console.warn(`[tiktok] WAF challenge hit for ${url}`);
-        } else {
-          console.warn(`[tiktok] no embedded JSON (unknown cause) for ${url}`);
+          // Bot detection, not a missing video: a plain Error routes to
+          // the generic "try again in a minute" message instead of
+          // wrongly telling the user the video is private/deleted.
+          throw new Error("WAF challenge served instead of the video page");
         }
+        console.warn(`[tiktok] no embedded JSON (unknown cause) for ${url}`);
         throw new VideoUnavailableError(
           "No embedded video JSON -- video may be private/deleted/region-locked",
         );
