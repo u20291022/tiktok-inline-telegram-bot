@@ -17,22 +17,24 @@
 - `tiktok.com/t/...`
 
 <p align="center">
-  <img src="assets/inline-query-popup.png" width="340" alt="Ввод ссылки в inline-режиме"><br>
+  <img src="assets/inline-query-popup.png" width="320" alt="Ввод ссылки в inline-режиме"><br>
   <sub>Наберите <code>@toksendbot &lt;ссылка&gt;</code> в любом чате и нажмите на подсказку</sub>
 </p>
+
 <p align="center">
-  <img src="assets/video-delivered.jpg" width="340" alt="Готовое видео в чате"><br>
+  <img src="assets/video-delivered.jpg" width="320" alt="Готовое видео в чате"><br>
   <sub>Видео приходит в чат вместе с описанием и автором</sub>
 </p>
 
 Личные сообщения боту не поддерживаются — при команде `/start` он сразу объясняет это и показывает пример использования.
 
 <p align="center">
-  <img src="assets/bot-profile-start.png" width="340" alt="Экран приветствия бота"><br>
+  <img src="assets/bot-profile-start.jpg" width="320" alt="Экран приветствия бота"><br>
   <sub>Экран приветствия бота</sub>
 </p>
+
 <p align="center">
-  <img src="assets/bot-start-reply.png" width="340" alt="Ответ бота на /start"><br>
+  <img src="assets/bot-start-reply.png" width="320" alt="Ответ бота на /start"><br>
   <sub>Что отвечает бот на <code>/start</code></sub>
 </p>
 
