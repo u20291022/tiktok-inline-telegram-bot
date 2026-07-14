@@ -1,4 +1,4 @@
-import type { Browser, Page } from "puppeteer";
+import type { Browser, HTTPResponse, Page } from "puppeteer";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
@@ -128,7 +128,7 @@ export class TikTokParser {
     // URL and pick the one that matches this video's own metadata later.
     const capturedByUrl = new Map<string, Buffer>();
 
-    const onResponse = async (res: import("puppeteer").HTTPResponse) => {
+    const onResponse = async (res: HTTPResponse) => {
       const ct = res.headers()["content-type"] || "";
       if (
         ct.includes("video/mp4") &&
@@ -217,7 +217,7 @@ export class TikTokParser {
       };
 
       // The video response may have arrived before metadata was evaluated, so
-      // check immediately before falling into the same poll/deadline as before.
+      // check immediately, then poll until the deadline.
       let videoBuffer = findMatch();
       const deadline = Date.now() + VIDEO_WAIT_MS;
       while (!videoBuffer && Date.now() < deadline) {

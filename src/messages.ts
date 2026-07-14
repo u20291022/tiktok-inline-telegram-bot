@@ -29,8 +29,8 @@ export const messages: Record<
     start: (botUsername: string) => string;
     loadingTitle: string;
     loadingCaption: string;
-    inlineLoadingCaption: string,
-    loadingCaptionWithoutEmoji: string,
+    inlineLoadingCaption: string;
+    loadingCaptionWithoutEmoji: string;
     doneCaption: string;
     openInTikTok: string;
     errorUnavailable: string;

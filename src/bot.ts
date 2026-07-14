@@ -16,7 +16,7 @@ interface CacheEntry {
   caption: string;
 }
 
-// video url / video id -> uploaded telegram file_id
+// video url / video id -> uploaded telegram file_id + prebuilt caption parts
 const cache = new Map<string, CacheEntry>();
 
 function resultId(url: string): string {
@@ -201,8 +201,7 @@ async function deliverVideo(
     // Add "Open in TikTok button"
     await telegram.editMessageReplyMarkup(undefined, undefined, inlineMessageId, {
       inline_keyboard: [[{ text: m.openInTikTok, url }]],
-    })
-
+    });
   } catch (err) {
     console.error(`[bot] failed to deliver ${url}:`, err);
     let text = m.errorParse;
