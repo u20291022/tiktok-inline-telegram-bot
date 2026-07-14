@@ -19,8 +19,12 @@ interface CacheEntry {
 // video url / video id -> uploaded telegram file_id + prebuilt caption parts
 const cache = new Map<string, CacheEntry>();
 
-function resultId(url: string): string {
-  return createHash("sha1").update(url).digest("hex").slice(0, 32);
+// The prefix encodes what kind of message the result sends ("video:" for a
+// cached video, "text:" for the text placeholder). Telegram echoes the id
+// back in chosen_inline_result, which needs to know the message kind to
+// pick the right edit method (editMessageCaption vs editMessageText).
+function resultId(kind: "video" | "text", url: string): string {
+  return `${kind}:${createHash("sha1").update(url).digest("hex").slice(0, 32)}`;
 }
 
 function buildCacheEntry(video: ParsedVideo, fileId: string): CacheEntry {
@@ -65,7 +69,7 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
         [
           {
             type: "video",
-            id: resultId(url),
+            id: resultId("video", url),
             video_file_id: cached.fileId,
             title: cached.title,
             caption: videoCaption(m.doneCaption, cached),
@@ -99,14 +103,14 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
       [
         {
           type: "article",
-          id: resultId(url),
+          id: resultId("text", url),
           title: m.loadingTitle,
           description: m.inlineLoadingCaption,
           input_message_content: {
-            message_text: m.loadingCaptionWithoutEmoji
-            // Send it without emoji first
-            // in "chosen_inline_result" bot will edit message
-            // so custom emoji can be shown
+            // Sent without custom emoji: inline-sent messages only render
+            // them after an edit, so chosen_inline_result re-sends the
+            // loading text with emoji right away.
+            message_text: m.loadingCaptionWithoutEmoji,
           },
           reply_markup: {
             inline_keyboard: [[{ text: m.openInTikTok, url }]],
@@ -120,22 +124,41 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
   // Dont forget to enable /setinlinefeedback in BotFather
   // or bot dont get "chosen_inline_result" updates
   bot.on("chosen_inline_result", async (ctx) => {
-    const { inline_message_id, query, from } = ctx.chosenInlineResult;
+    const { inline_message_id, result_id, query, from } = ctx.chosenInlineResult;
     // Both result types attach a reply_markup so this is always present;
     // guard anyway since Telegram's typing marks it optional.
-
     if (!inline_message_id) return;
     const url = extractTikTokUrl(query);
     if (!url) return;
 
-    // the placeholder is a photo message, so update its caption
-    const m = messages[pickLang(ctx.from.language_code)];
-    await ctx.editMessageCaption(m.loadingCaption, {
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [[{ text: m.openInTikTok, url }]],
-      },
-    }).catch(() => {});
+    // What was sent: a video message (cached result) or the text
+    // placeholder. Text messages have no caption, so they must be edited
+    // via editMessageText -- editMessageCaption is a 400 there.
+    const isVideoMessage = result_id.startsWith("video:");
+
+    // Re-send the loading text with its custom emoji (inline-sent messages
+    // only render custom emoji after an edit); cosmetic, so failures are
+    // fine to ignore.
+    const m = messages[pickLang(from.language_code)];
+    if (isVideoMessage) {
+      await ctx
+        .editMessageCaption(m.loadingCaption, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[{ text: m.openInTikTok, url }]],
+          },
+        })
+        .catch(() => {});
+    } else {
+      await ctx
+        .editMessageText(m.loadingCaption, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[{ text: m.openInTikTok, url }]],
+          },
+        })
+        .catch(() => {});
+    }
 
     // Fire and forget: a 10-20s parse must not block other updates.
     void deliverVideo(
@@ -145,6 +168,7 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
       inline_message_id,
       from,
       ctx.botInfo.username,
+      isVideoMessage,
     );
   });
 }
@@ -156,6 +180,7 @@ async function deliverVideo(
   inlineMessageId: string,
   from: User,
   botUsername: string,
+  isVideoMessage: boolean,
 ): Promise<void> {
   const m = messages[pickLang(from.language_code)];
 
@@ -192,17 +217,36 @@ async function deliverVideo(
       cache.set(video.id, entry);
     }
 
-    await telegram.editMessageMedia(undefined, undefined, inlineMessageId, {
-      type: "video",
-      media: entry.fileId,
-      caption: videoCaption(m.doneCaption, entry),
-      parse_mode: "HTML",
-    });
-    // Add "Open in TikTok button"
-    await telegram.editMessageReplyMarkup(undefined, undefined, inlineMessageId, {
-      inline_keyboard: [[{ text: m.openInTikTok, url }]],
-    });
+    // The "Open in TikTok" button rides along in the same edit: a separate
+    // editMessageReplyMarkup call could fail after the media edit already
+    // succeeded and wrongly send an already-delivered video into the error
+    // handler below.
+    await telegram.editMessageMedia(
+      undefined,
+      undefined,
+      inlineMessageId,
+      {
+        type: "video",
+        media: entry.fileId,
+        caption: videoCaption(m.doneCaption, entry),
+        parse_mode: "HTML",
+      },
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: m.openInTikTok, url }]],
+        },
+      },
+    );
   } catch (err) {
+    if (
+      err instanceof TelegramError &&
+      err.description.includes("message is not modified")
+    ) {
+      // The message already shows exactly this content (e.g. a cached
+      // video whose loading edit didn't land) -- that's success, not
+      // something to overwrite with an error text.
+      return;
+    }
     console.error(`[bot] failed to deliver ${url}:`, err);
     let text = m.errorParse;
     if (err instanceof VideoUnavailableError) {
@@ -211,11 +255,21 @@ async function deliverVideo(
       // bot can't message the user (never started / blocked)
       text = m.errorNeedStart(botUsername);
     }
-    // the placeholder is a photo message, so update its caption
-    await telegram
-      .editMessageCaption(undefined, undefined, inlineMessageId, text, {
-        parse_mode: "HTML",
-      })
-      .catch(() => {});
+    // The media edit is the last step above, so on error the message is
+    // still whatever was originally sent: a video (cached result) with a
+    // caption to edit, or the plain text placeholder.
+    if (isVideoMessage) {
+      await telegram
+        .editMessageCaption(undefined, undefined, inlineMessageId, text, {
+          parse_mode: "HTML",
+        })
+        .catch(() => {});
+    } else {
+      await telegram
+        .editMessageText(undefined, undefined, inlineMessageId, text, {
+          parse_mode: "HTML",
+        })
+        .catch(() => {});
+    }
   }
 }
