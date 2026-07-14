@@ -17,15 +17,23 @@ Supported links:
 - `tiktok.com/t/...`
 
 <p align="center">
-  <img src="assets/inline-query-popup.png" width="260" alt="Typing a link in inline mode" />
-  <img src="assets/video-delivered.jpg" width="260" alt="Video delivered in chat" />
+  <img src="assets/inline-query-popup.png" width="340" alt="Typing a link in inline mode"><br>
+  <sub>Type <code>@toksendbot &lt;link&gt;</code> in any chat and tap the suggestion</sub>
+</p>
+<p align="center">
+  <img src="assets/video-delivered.jpg" width="340" alt="Video delivered in chat"><br>
+  <sub>The video lands in the chat with its caption and author</sub>
 </p>
 
 Direct messages to the bot aren't supported — `/start` immediately explains that and shows an example.
 
 <p align="center">
-  <img src="assets/bot-profile-start.png" width="260" alt="Bot welcome screen" />
-  <img src="assets/bot-howto.png" width="260" alt="Bot's /start reply" />
+  <img src="assets/bot-profile-start.png" width="340" alt="Bot welcome screen"><br>
+  <sub>The bot's welcome screen</sub>
+</p>
+<p align="center">
+  <img src="assets/bot-start-reply.png" width="340" alt="Bot's /start reply"><br>
+  <sub>What <code>/start</code> replies with</sub>
 </p>
 
 ---
