@@ -84,6 +84,12 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
       return;
     }
 
+    // Speculatively start parsing now instead of waiting for the user to
+    // pick the result. parser.parse() dedupes concurrent calls to the same
+    // URL, so chosen_inline_result's later parse() call reuses this one --
+    // this is a head start, so never let a failure here affect the response.
+    void parser.parse(url).catch(() => {});
+
     // Parsing takes seconds while inline queries time out fast, so answer
     // with a placeholder right away; the real work happens once the user
     // actually picks the result (chosen_inline_result below). The inline
