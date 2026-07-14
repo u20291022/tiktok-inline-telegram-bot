@@ -44,8 +44,22 @@ Direct messages to the bot aren't supported — `/start` immediately explains th
 
 - **`src/index.ts`** — entry point: loads `.env`, creates the bot and the parser, starts polling or webhook mode, and shuts down cleanly on `SIGINT`/`SIGTERM`.
 - **`src/bot.ts`** — all the Telegram logic: handles `inline_query` (answers instantly with a placeholder, since Telegram inline queries must be answered fast while parsing a video takes seconds) and `chosen_inline_result` (the actual download only starts once the user taps the result). Already-downloaded videos are cached in memory by URL and by video id, so repeated requests answer instantly by reusing the Telegram `file_id`.
-- **`src/tiktok.ts`** — the TikTok parser, built on **Puppeteer** (`puppeteer-extra` + `puppeteer-extra-plugin-stealth`). A plain `fetch`/`curl` gets a 403 from TikTok's protection (Akamai/Slardar fingerprints the TLS/HTTP2 handshake and serves a JS challenge), so the video page is loaded in a real headless Chromium instance instead. The stealth plugin patches automation fingerprints such as `navigator.webdriver`. Video metadata (author, description, dimensions) is read from the JSON embedded in the page HTML (`__UNIVERSAL_DATA_FOR_REHYDRATION__`), while the video file itself is captured from the page's `video/mp4` network response as it loads. Random delays and a one-time "warm-up" visit to the homepage are added so the browser behaves less like a bot.
-- **`src/messages.ts`** — all bot texts in English and Russian, picked based on the user's Telegram `language_code`.
+- **`src/tiktok.ts`** — the TikTok parser, built on **Puppeteer** (`puppeteer-extra` + `puppeteer-extra-plugin-stealth`). A plain `fetch`/`curl` gets a 403 from TikTok's protection (Akamai/Slardar fingerprints the TLS/HTTP2 handshake and serves a JS challenge), so the video page is loaded in a real headless Chromium instance instead. The stealth plugin patches automation fingerprints such as `navigator.webdriver`. Video metadata (author, description, dimensions) is read from the JSON embedded in the page HTML (`__UNIVERSAL_DATA_FOR_REHYDRATION__`), while the video file itself is captured from the page's network responses — every `video/mp4` response is matched against the URLs in the parsed item's `video` object (`playAddr`, `downloadAddr`, and `bitrateInfo` variants) before being accepted, since the page can fire other `video/mp4` responses that aren't the actual video. Random delays and a one-time "warm-up" visit to the homepage are added so the browser behaves less like a bot.
+- **`src/messages.ts`** — all bot texts in English and Russian, picked based on the user's Telegram `language_code`. The `tg-emoji` IDs in `EMOJI` are the original bot's personal Telegram Premium emoji picks; forks should swap them for IDs of their own, though nothing breaks if you don't — Telegram just renders the plain-unicode fallback baked into each `emoji()` call instead.
+
+---
+
+## Hosting location
+
+Where you host the bot affects whether TikTok will even hand over the video, independent of anything the stealth plugin does.
+
+In production we hit `itemInfo` coming back empty with `statusCode: 10204` and a `statusMsg` containing `ru_cross_border_block,ru_watch_video` — TikTok enforcing Russia's cross-border data rules. This is decided by the **ASN the server's IP belongs to**, not by the machine's actual location, timezone, or browser locale, and it's a different failure mode from bot detection: no amount of stealth-plugin tuning, warm-up navigation, or jitter fixes it.
+
+The two failures log differently and are easy to tell apart:
+- `[tiktok] WAF challenge hit for <url>` + a tiny page (barely more than an empty `<head>`) → Akamai/Slardar **bot detection**. The stealth plugin, warm-up visit, and randomized delays already in `src/tiktok.ts` are the right tools here.
+- `[tiktok] no embedded JSON (unknown cause) for <url>` + a full-size page (hundreds of KB, a real `<body>`) → the page loaded normally but the item data came back blocked. This is the **cross-border/compliance block**, and the fix is hosting elsewhere, not more stealth.
+
+If you hit the second one, move the bot off any provider whose IP ranges are known for reselling Russia-based TikTok-circumvention VPN/proxy access — TikTok already treats those ranges as suspect. Mainstream providers (Hetzner, DigitalOcean, Vultr, OVH, etc.) generally read as ordinary hosting rather than VPN exit nodes and don't hit this block.
 
 ---
 
@@ -84,6 +98,14 @@ BOT_TOKEN=your-telegram-bot-token
 BOT_MODE=polling     # or webhook for production behind nginx
 ```
 
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `BOT_TOKEN` | always | Token from [@BotFather](https://t.me/BotFather) |
+| `BOT_MODE` | always | `polling` (default, local/dev) or `webhook` (production behind a reverse proxy) |
+| `WEBHOOK_DOMAIN` | `webhook` mode only | Public HTTPS domain Telegram sends updates to, e.g. `https://example.com` |
+| `WEBHOOK_PATH` | `webhook` mode only | URL path nginx proxies through to the bot, e.g. `/tg-webhook-path` |
+| `WEBHOOK_PORT` | `webhook` mode only | Local port the bot listens on behind the reverse proxy |
+
 ### 4. Setting up the bot in BotFather
 1. Message [@BotFather](https://t.me/BotFather) → `/newbot`, pick a name and username, grab the token — put it into `BOT_TOKEN`.
 2. Turn on inline mode: `/setinline` → select your bot → enter a placeholder text (e.g. "Send TikTok video").
@@ -98,6 +120,16 @@ pnpm xvfb     # run through a virtual display, if needed
 ```
 
 For webhook mode also set `WEBHOOK_DOMAIN`, `WEBHOOK_PATH` and `WEBHOOK_PORT` in `.env` — the bot only binds `127.0.0.1`; something like nginx needs to reverse-proxy it over HTTPS.
+
+---
+
+## Troubleshooting
+
+If the bot can't fetch videos, `src/tiktok.ts`'s console output points at one of three causes:
+
+1. **Bot detection (WAF challenge)** — `[tiktok] WAF challenge hit for <url>` with a tiny captured page. See [Hosting location](#hosting-location) — this is the case the stealth plugin, warm-up visit, and jitter are meant to handle; if it happens constantly, check that the Chromium build actually has the stealth patches applied (not a bare `puppeteer-core` swap).
+2. **Geo/compliance block** — `[tiktok] no embedded JSON (unknown cause) for <url>` with a full-size captured page. This is the `ru_cross_border_block` issue described in [Hosting location](#hosting-location) — it's about the server's IP/ASN, not the browser, so re-tuning the parser won't help.
+3. **Network/DNS hangs** — every navigation times out at `NAV_TIMEOUT_MS` (30s), including the warm-up visit to `tiktok.com/`, and other sites are just as slow or unreachable from the same host. This isn't TikTok-specific — it's usually the host's DNS resolver or routing. Compare `dig tiktok.com` against your configured resolver with `dig @1.1.1.1 tiktok.com`; if 1.1.1.1 answers fine but the configured resolver doesn't, fix DNS on the host rather than the bot.
 
 ---
 
