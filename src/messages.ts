@@ -27,9 +27,6 @@ export const messages: Record<
   Lang,
   {
     start: (botUsername: string) => string;
-    helpTitle: string;
-    helpDescription: string;
-    helpText: string;
     loadingTitle: string;
     loadingCaption: string;
     inlineLoadingCaption: string,
@@ -51,11 +48,6 @@ export const messages: Record<
       "• vm.tiktok.com/…\n" +
       "• tiktok.com/@user/video/…\n" +
       "• tiktok.com/t/…",
-    helpTitle: "Send me a TikTok link",
-    helpDescription:
-      "vt.tiktok.com/… • vm.tiktok.com/… • tiktok.com/@user/video/… • tiktok.com/t/…",
-    helpText:
-      "To download a TikTok video, type the bot username followed by a TikTok link.",
     loadingTitle: "Send TikTok video",
     loadingCaption: `${emoji(EMOJI.loading, "🥳")} Loading video, it will appear here in a few seconds…`,
     inlineLoadingCaption: `Tap here to start loading your video!`,
@@ -77,11 +69,6 @@ export const messages: Record<
       "• vm.tiktok.com/…\n" +
       "• tiktok.com/@user/video/…\n" +
       "• tiktok.com/t/…",
-    helpTitle: "Отправьте ссылку на TikTok",
-    helpDescription:
-      "vt.tiktok.com/… • vm.tiktok.com/… • tiktok.com/@user/video/… • tiktok.com/t/…",
-    helpText:
-      "Чтобы скачать видео из TikTok, введите имя бота и ссылку на видео.",
     loadingTitle: "Отправить видео из TikTok",
     loadingCaption: `${emoji(EMOJI.loading, "🥳")} Загружаю видео, оно появится здесь через несколько секунд…`,
     inlineLoadingCaption: `Нажмите сюда, чтобы загрузить видео!`,
