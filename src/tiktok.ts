@@ -18,6 +18,9 @@ const UA =
 const POOL_SIZE = 2; // max videos parsed in parallel; the rest queue up
 const NAV_TIMEOUT_MS = 30_000;
 const VIDEO_WAIT_MS = 20_000;
+// How long a finished parse stays reusable, so a chosen_inline_result that
+// arrives after the speculative parse already resolved doesn't re-parse.
+const RESULT_TTL_MS = 45_000;
 
 /** Random delay (ms) so consecutive requests don't look mechanically regular. */
 function jitter(minMs = 1000, maxMs = 3000): Promise<void> {
@@ -57,13 +60,23 @@ export class TikTokParser {
   private closed = false;
   private warmedUp = false;
 
-  /** Parses and downloads a video; concurrent calls for the same URL share one job. */
+  /**
+   * Parses and downloads a video; concurrent calls for the same URL share
+   * one job, and a resolved job stays reusable for RESULT_TTL_MS so a call
+   * shortly after completion (speculative parse finished before the user
+   * picked the result) returns instantly instead of re-parsing.
+   */
   parse(url: string): Promise<ParsedVideo> {
     const existing = this.inflight.get(url);
     if (existing) return existing;
 
-    const job = this.doParse(url).finally(() => this.inflight.delete(url));
+    const job = this.doParse(url);
     this.inflight.set(url, job);
+    job.then(
+      // failures are dropped right away so the next attempt can retry
+      () => setTimeout(() => this.inflight.delete(url), RESULT_TTL_MS),
+      () => this.inflight.delete(url),
+    );
     return job;
   }
 
