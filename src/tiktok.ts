@@ -32,7 +32,7 @@ function jitter(minMs = 1000, maxMs = 3000): Promise<void> {
 }
 
 const TIKTOK_URL_RE =
-  /(?:https?:\/\/)?(?:(?:vt|vm)\.tiktok\.com\/[\w.-]+|(?:www\.)?tiktok\.com\/(?:@[\w.-]+\/video\/\d+|t\/[\w.-]+))\/?/i;
+  /(?:https?:\/\/)?(?:(?:vt|vm)\.tiktok\.com\/[\w.-]+|(?:www\.)?tiktok\.com\/(?:@[\w.-]+\/(?:video|photo)\/\d+|t\/[\w.-]+))\/?/i;
 
 /** Finds a TikTok link in free-form text; returns a normalized https URL. */
 export function extractTikTokUrl(text: string): string | null {
@@ -295,5 +295,71 @@ export class TikTokParser {
       await page.goto("about:blank").catch(() => {});
       this.releasePage(page);
     }
+  }
+
+  /** Downloads one photo-post image, retrying with the mirror URL once. */
+  private async downloadImageWithRetry(
+    page: Page,
+    image: { imageURL?: { urlList?: string[] } },
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    const urls = image.imageURL?.urlList ?? [];
+    if (urls.length === 0) throw new Error("Photo post image has no urlList");
+    try {
+      return await this.downloadMedia(page, urls[0], ["image/"]);
+    } catch (err) {
+      if (!urls[1]) throw err;
+      return await this.downloadMedia(page, urls[1], ["image/"]);
+    }
+  }
+
+  /**
+   * Navigates the page directly to a media URL and captures the response
+   * body, the same Chromium-in-the-loop trick doParse uses for video/mp4 --
+   * these CDN URLs sit behind the same Akamai TLS fingerprinting.
+   */
+  private async downloadMedia(
+    page: Page,
+    url: string,
+    contentTypePrefixes: string[],
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    let result: { buffer: Buffer; contentType: string } | null = null;
+    const onResponse = async (res: HTTPResponse) => {
+      if (result) return;
+      const ct = res.headers()["content-type"] || "";
+      if (
+        res.status() === 200 &&
+        contentTypePrefixes.some((p) => ct.startsWith(p))
+      ) {
+        try {
+          result = { buffer: Buffer.from(await res.buffer()), contentType: ct };
+        } catch {
+          // body already gone -- the deadline below will surface the failure
+        }
+      }
+    };
+
+    page.on("response", onResponse);
+    try {
+      // A top-level page.goto to a media URL makes Chrome treat it as a
+      // file download (ERR_ABORTED) instead of a navigable response, so the
+      // request is issued in-page instead; CDP still exposes the raw body
+      // via response.buffer() regardless of the page's own CORS visibility.
+      await page.evaluate((u) => {
+        fetch(u, { mode: "no-cors", credentials: "omit" }).catch(() => {});
+      }, url);
+      const deadline = Date.now() + NAV_TIMEOUT_MS;
+      while (!result && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } finally {
+      page.off("response", onResponse);
+    }
+
+    if (!result) {
+      throw new Error(
+        `Failed to download media (${contentTypePrefixes.join("/")}) from ${url}`,
+      );
+    }
+    return result;
   }
 }
