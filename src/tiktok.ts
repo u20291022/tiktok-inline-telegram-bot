@@ -258,6 +258,10 @@ export class TikTokParser {
         );
       }
 
+      if (item.imagePost?.images?.length > 0) {
+        return await this.parsePhotoPost(item, page);
+      }
+
       // The CDN URLs this video is actually served from, per its own metadata.
       // A captured response only counts if its URL is one of these, otherwise
       // it belongs to a prefetched recommendation, not the requested video.
@@ -306,6 +310,71 @@ export class TikTokParser {
       await page.goto("about:blank").catch(() => {});
       this.releasePage(page);
     }
+  }
+
+  /**
+   * Photo posts have no video track: download each slide image plus the
+   * background track, then compose them into an actual mp4 with ffmpeg so
+   * downstream code (caching, Telegram upload) sees an ordinary ParsedVideo.
+   */
+  private async parsePhotoPost(item: any, page: Page): Promise<ParsedVideo> {
+    const images: Array<{
+      imageWidth: number;
+      imageHeight: number;
+      imageURL?: { urlList?: string[] };
+    }> = item.imagePost.images;
+
+    const imageFiles: Array<{ buffer: Buffer; contentType: string }> = [];
+    for (const image of images) {
+      imageFiles.push(await this.downloadImageWithRetry(page, image));
+    }
+
+    const audioUrl = String(item.music?.playUrl ?? "");
+    if (!audioUrl) {
+      throw new Error("Photo post is missing item.music.playUrl");
+    }
+    // TikTok serves some music tracks through the same video CDN infra used
+    // for videos, tagged Content-Type: video/mp4 despite carrying no video
+    // stream, so both content-types are accepted here.
+    const audioFile = await this.downloadMedia(page, audioUrl, [
+      "audio/",
+      "video/mp4",
+    ]);
+
+    const musicDuration = Number(item.music?.duration ?? 0);
+    const perImageSeconds =
+      musicDuration > 0
+        ? musicDuration / images.length
+        : PHOTO_POST_FALLBACK_SECONDS_PER_IMAGE;
+    const totalDuration =
+      musicDuration > 0
+        ? musicDuration
+        : images.length * PHOTO_POST_FALLBACK_SECONDS_PER_IMAGE;
+
+    const firstImage = images[0];
+    const { width, height } = computeCanvas(
+      Number(firstImage.imageWidth),
+      Number(firstImage.imageHeight),
+      PHOTO_POST_MAX_SIDE,
+    );
+
+    const buffer = await this.composePhotoPostVideo(
+      imageFiles,
+      audioFile,
+      perImageSeconds,
+      width,
+      height,
+    );
+
+    return {
+      id: String(item.id),
+      author: String(item.author?.uniqueId ?? ""),
+      description: String(item.desc ?? ""),
+      duration: totalDuration,
+      width,
+      height,
+      buffer,
+    };
   }
 
   /** Downloads one photo-post image, retrying with the mirror URL once. */
