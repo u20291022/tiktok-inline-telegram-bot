@@ -405,6 +405,11 @@ export class TikTokParser {
     let result: { buffer: Buffer; contentType: string } | null = null;
     const onResponse = async (res: HTTPResponse) => {
       if (result) return;
+      // The page keeps loading unrelated background responses (favicons,
+      // TikTok's own logo/icon assets, other queued thumbnails) while we
+      // wait, and those can share a content-type prefix with what we asked
+      // for -- so the response must also match the exact URL we requested.
+      if (res.url() !== url) return;
       const ct = res.headers()["content-type"] || "";
       if (
         res.status() === 200 &&
