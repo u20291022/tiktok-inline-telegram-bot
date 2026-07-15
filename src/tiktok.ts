@@ -18,6 +18,9 @@ const UA =
 const POOL_SIZE = 2; // max videos parsed in parallel; the rest queue up
 const NAV_TIMEOUT_MS = 30_000;
 const VIDEO_WAIT_MS = 20_000;
+// Photo posts fetch their item data client-side after the page loads, so the
+// script-tag miss must wait a bit for that XHR before giving up.
+const API_ITEM_WAIT_MS = 15_000;
 // How long a finished parse stays reusable, so a chosen_inline_result that
 // arrives after the speculative parse already resolved doesn't re-parse.
 const RESULT_TTL_MS = 45_000;
@@ -141,17 +144,39 @@ export class TikTokParser {
     // URL and pick the one that matches this video's own metadata later.
     const capturedByUrl = new Map<string, Buffer>();
 
+    // Photo posts carry no item data in the embedded script tag; it's
+    // fetched client-side instead, so capture that response as a fallback.
+    let apiItemCaptured = false;
+    let apiItem: unknown = null;
+
     const onResponse = async (res: HTTPResponse) => {
       const ct = res.headers()["content-type"] || "";
+      const resUrl = res.url();
       if (
         ct.includes("video/mp4") &&
         res.status() === 200 &&
-        !capturedByUrl.has(res.url())
+        !capturedByUrl.has(resUrl)
       ) {
         try {
-          capturedByUrl.set(res.url(), Buffer.from(await res.buffer()));
+          capturedByUrl.set(resUrl, Buffer.from(await res.buffer()));
         } catch {
           // body already gone (duplicate/aborted request) -- ignore
+        }
+        return;
+      }
+      if (
+        !apiItemCaptured &&
+        resUrl.includes("/api/item/detail/") &&
+        resUrl.includes("itemId=") &&
+        ct.includes("application/json") &&
+        res.status() === 200
+      ) {
+        apiItemCaptured = true;
+        try {
+          const json = JSON.parse(await res.text());
+          apiItem = json?.itemInfo?.itemStruct ?? null;
+        } catch {
+          // malformed body -- leave apiItem null, handled like a missing item
         }
       }
     };
@@ -181,7 +206,7 @@ export class TikTokParser {
       });
 
       // Metadata is embedded in the page HTML regardless of the video request
-      const item = await page.evaluate(() => {
+      let item = await page.evaluate(() => {
         const script = document.getElementById(
           "__UNIVERSAL_DATA_FOR_REHYDRATION__",
         );
@@ -190,6 +215,17 @@ export class TikTokParser {
         return data.__DEFAULT_SCOPE__?.["webapp.video-detail"]?.itemInfo
           ?.itemStruct ?? null;
       });
+
+      if (!item) {
+        // Photo posts have no embedded item JSON -- their data instead
+        // arrives via a client-side XHR captured by onResponse above, which
+        // may not have landed yet, so give it a moment before giving up.
+        const apiDeadline = Date.now() + API_ITEM_WAIT_MS;
+        while (!apiItem && Date.now() < apiDeadline) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        item = apiItem as typeof item;
+      }
 
       if (!item) {
         // Distinguish a WAF (Slardar) JS challenge from a genuinely
