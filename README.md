@@ -10,10 +10,13 @@ The bot downloads a TikTok video from a link and drops it straight into any chat
 2. A "Send TikTok video" suggestion pops up — tap it.
 3. Within a few seconds the placeholder message turns into the actual video, with its caption and author.
 
+Photo-post (slideshow) links work the same way — the bot stitches the images and background music into a short video automatically before sending it.
+
 Supported links:
 - `vt.tiktok.com/...`
 - `vm.tiktok.com/...`
 - `tiktok.com/@user/video/...`
+- `tiktok.com/@user/photo/...`
 - `tiktok.com/t/...`
 
 <p align="center">
@@ -43,8 +46,9 @@ Direct messages to the bot aren't supported — `/start` immediately explains th
 ## How it works
 
 - **`src/index.ts`** — entry point: loads `.env`, creates the bot and the parser, starts polling or webhook mode, and shuts down cleanly on `SIGINT`/`SIGTERM`.
-- **`src/bot.ts`** — all the Telegram logic: `inline_query` answers instantly with a placeholder (Telegram inline queries must be answered fast, while parsing a video takes seconds) and also speculatively starts parsing the video in the background right away, so it's often already done by the time the user taps the result. `chosen_inline_result` fires once a result is actually picked and edits that placeholder into the finished video. Already-downloaded videos are cached in memory by URL and by video id, so repeated requests answer instantly by reusing the Telegram `file_id`.
-- **`src/tiktok.ts`** — the TikTok parser, built on **Puppeteer** (`puppeteer-extra` + `puppeteer-extra-plugin-stealth`). A plain `fetch`/`curl` gets a 403 from TikTok's protection (Akamai/Slardar fingerprints the TLS/HTTP2 handshake and serves a JS challenge), so the video page is loaded in a real headless Chromium instance instead. The stealth plugin patches automation fingerprints such as `navigator.webdriver`. Video metadata (author, description, dimensions) is read from the JSON embedded in the page HTML (`__UNIVERSAL_DATA_FOR_REHYDRATION__`), while the video file itself is captured from the page's network responses — every `video/mp4` response is matched against the URLs in the parsed item's `video` object (`playAddr`, `downloadAddr`, and `bitrateInfo` variants) before being accepted, since the page can fire other `video/mp4` responses that aren't the actual video. Random delays and a one-time "warm-up" visit to the homepage are added so the browser behaves less like a bot. A finished parse stays reusable for 45 seconds, so the speculative parse from `bot.ts` and the later `chosen_inline_result` call usually collapse into a single browser navigation instead of two. When the embedded JSON is missing, the parser tells apart a WAF challenge (retryable — reported to the user as "try again in a minute") from a genuinely blocked/missing video (reported as "may be private/deleted/region-locked"); see [Hosting location](#hosting-location) below for what the second one usually really means.
+- **`src/bot/`** — all the Telegram logic, split by concern: `index.ts` wires up the `inline_query`/`chosen_inline_result` handlers, `cache.ts` holds the in-memory URL/video-id → Telegram `file_id` cache and caption building, and `deliver.ts` does the actual parse-then-upload-then-edit flow. `inline_query` answers instantly with a placeholder (Telegram inline queries must be answered fast, while parsing a video takes seconds) and also speculatively starts parsing in the background right away, so it's often already done by the time the user taps the result. `chosen_inline_result` fires once a result is actually picked and edits that placeholder into the finished video. Already-downloaded videos are cached by URL and by video id, so repeated requests answer instantly by reusing the Telegram `file_id`.
+- **`src/tiktok/`** — the TikTok parser, split by concern: `browser.ts` owns the **Puppeteer** (`puppeteer-extra` + `puppeteer-extra-plugin-stealth`) browser pool, the one-time homepage warm-up, and the randomized jitter between requests; `urls.ts` matches TikTok links, including photo-post URLs; `video.ts` navigates the page, tells a WAF challenge apart from a genuinely missing video, and matches captured `video/mp4` responses against the URLs in the parsed item's `video` object (`playAddr`, `downloadAddr`, `bitrateInfo`) before accepting one, since the page can fire other `video/mp4` responses that aren't the actual video; `types.ts` holds the shared `ParsedVideo` type and tuning constants. A plain `fetch`/`curl` gets a 403 from TikTok's protection (Akamai/Slardar fingerprints the TLS/HTTP2 handshake and serves a JS challenge), so the video page is loaded in a real headless Chromium instance instead, with metadata read from the JSON embedded in the page HTML (`__UNIVERSAL_DATA_FOR_REHYDRATION__`). A finished parse stays reusable for 45 seconds, so the speculative parse from `bot/index.ts` and the later `chosen_inline_result` call usually collapse into a single browser navigation instead of two. When the embedded JSON is missing, the parser tells apart a WAF challenge (retryable — reported to the user as "try again in a minute") from a genuinely blocked/missing video (reported as "may be private/deleted/region-locked"); see [Hosting location](#hosting-location) below for what the second one usually really means.
+- **`src/tiktok/photoPost.ts` + `ffmpeg.ts`** — TikTok photo posts (`tiktok.com/@user/photo/...`) have no video at all, just a slideshow of images with a music track, and no embedded item JSON either — that data instead arrives via a client-side XHR TikTok's own page makes, which `photoPost.ts` waits for. It then downloads each image and the audio track through the same Chromium-based CDN fetch trick used for videos, and `ffmpeg.ts` shells out to **ffmpeg** to compose them into an actual mp4 (each image shown for `music duration ÷ image count` seconds, or a flat 3s each if there's no usable music duration) — so the rest of the pipeline (caching, Telegram upload) sees an ordinary video either way.
 - **`src/messages.ts`** — all bot texts in English and Russian, picked based on the user's Telegram `language_code`. The `tg-emoji` IDs in `EMOJI` are the original bot's personal Telegram Premium emoji picks; forks should swap them for IDs of their own, though nothing breaks if you don't — Telegram just renders the plain-unicode fallback baked into each `emoji()` call instead.
 
 ---
@@ -56,7 +60,7 @@ Where you host the bot affects whether TikTok will even hand over the video, ind
 In production we hit `itemInfo` coming back empty with `statusCode: 10204` and a `statusMsg` containing `ru_cross_border_block,ru_watch_video` — TikTok enforcing Russia's cross-border data rules. This is decided by the **ASN the server's IP belongs to**, not by the machine's actual location, timezone, or browser locale, and it's a different failure mode from bot detection: no amount of stealth-plugin tuning, warm-up navigation, or jitter fixes it.
 
 The two failures log differently and are easy to tell apart:
-- `[tiktok] WAF challenge hit for <url>` + a tiny page (barely more than an empty `<head>`) → Akamai/Slardar **bot detection**. The stealth plugin, warm-up visit, and randomized delays already in `src/tiktok.ts` are the right tools here.
+- `[tiktok] WAF challenge hit for <url>` + a tiny page (barely more than an empty `<head>`) → Akamai/Slardar **bot detection**. The stealth plugin, warm-up visit, and randomized delays already in `src/tiktok/browser.ts` are the right tools here.
 - `[tiktok] no embedded JSON (unknown cause) for <url>` + a full-size page (hundreds of KB, a real `<body>`) → the page loaded normally but the item data came back blocked. This is the **cross-border/compliance block**, and the fix is hosting elsewhere, not more stealth.
 
 If you hit the second one, move the bot off any provider whose IP ranges are known for reselling Russia-based TikTok-circumvention VPN/proxy access — TikTok already treats those ranges as suspect. Mainstream providers (Hetzner, DigitalOcean, Vultr, OVH, etc.) generally read as ordinary hosting rather than VPN exit nodes and don't hit this block.
@@ -69,8 +73,9 @@ If you hit the second one, move the bot off any provider whose IP ranges are kno
 - Node.js version pinned in `.nvmrc` (currently `v24.18.0`)
 - pnpm
 - Linux/macOS/Windows able to run Chromium (Puppeteer downloads it automatically on install)
+- `ffmpeg` on `PATH` — only needed for photo-post (slideshow) links; plain video links work fine without it
 
-### 2. System libraries for Chromium (Linux only)
+### 2. System libraries for Chromium and ffmpeg (Linux only)
 Headless Chromium on a bare Linux server (Ubuntu/Debian) needs system libraries that minimal server images usually don't have:
 
 ```bash
@@ -82,6 +87,11 @@ sudo apt-get update && sudo apt-get install -y \
   libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 \
   libxi6 libxrandr2 libxrender1 libxss1 libxtst6 lsb-release \
   xdg-utils libu2f-udev libvulkan1
+```
+
+Photo-post slideshows are composed with **ffmpeg**, which isn't part of that dependency list and installs separately:
+```bash
+sudo apt-get install -y ffmpeg
 ```
 
 If the server has no virtual display, run through `xvfb` instead — `package.json` already has a `pnpm xvfb` script for that (needs the `xvfb` package: `sudo apt-get install -y xvfb`).
@@ -125,11 +135,12 @@ For webhook mode also set `WEBHOOK_DOMAIN`, `WEBHOOK_PATH` and `WEBHOOK_PORT` in
 
 ## Troubleshooting
 
-If the bot can't fetch videos, `src/tiktok.ts`'s console output points at one of three causes:
+If the bot can't fetch videos, `src/tiktok/video.ts`'s console output points at one of these causes:
 
 1. **Bot detection (WAF challenge)** — `[tiktok] WAF challenge hit for <url>` with a tiny captured page. The user sees a retryable "try again in a minute" error, not "video unavailable" — the parser tells the two apart, so if a definitely-public video comes back as "unavailable," this isn't the cause; see #2 below. See [Hosting location](#hosting-location) — this is the case the stealth plugin, warm-up visit, and jitter are meant to handle; if it happens constantly, check that the Chromium build actually has the stealth patches applied (not a bare `puppeteer-core` swap).
 2. **Geo/compliance block** — `[tiktok] no embedded JSON (unknown cause) for <url>` with a full-size captured page. The user sees "may be private/deleted/region-locked," but the real cause is the `ru_cross_border_block` issue described in [Hosting location](#hosting-location) — it's about the server's IP/ASN, not the browser, so re-tuning the parser won't help.
 3. **Network/DNS hangs** — every navigation times out at `NAV_TIMEOUT_MS` (30s), including the warm-up visit to `tiktok.com/`, and other sites are just as slow or unreachable from the same host. This isn't TikTok-specific — it's usually the host's DNS resolver or routing. Compare `dig tiktok.com` against your configured resolver with `dig @1.1.1.1 tiktok.com`; if 1.1.1.1 answers fine but the configured resolver doesn't, fix DNS on the host rather than the bot.
+4. **Photo posts fail while videos work fine** — the error mentions ffmpeg (`ffmpeg is not installed or not on PATH`). Photo-post slideshows need the `ffmpeg` binary on `PATH` (see [Installing it yourself](#installing-it-yourself)); regular video links don't touch ffmpeg at all, so this only shows up once someone sends a `tiktok.com/@user/photo/...` link.
 
 ---
 
