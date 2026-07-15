@@ -1,6 +1,13 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import type { Browser, HTTPResponse, Page } from "puppeteer";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
+
+const execFileAsync = promisify(execFile);
 
 // TikTok's CDN sits behind Akamai bot detection that fingerprints the
 // TLS/HTTP2 handshake, so the video must be captured through a real
@@ -21,6 +28,10 @@ const VIDEO_WAIT_MS = 20_000;
 // Photo posts fetch their item data client-side after the page loads, so the
 // script-tag miss must wait a bit for that XHR before giving up.
 const API_ITEM_WAIT_MS = 15_000;
+// Max side (px) the composed photo-post slideshow is scaled to.
+const PHOTO_POST_MAX_SIDE = 1080;
+// Per-image display time (s) when a photo post has no usable music duration.
+const PHOTO_POST_FALLBACK_SECONDS_PER_IMAGE = 3;
 // How long a finished parse stays reusable, so a chosen_inline_result that
 // arrives after the speculative parse already resolved doesn't re-parse.
 const RESULT_TTL_MS = 45_000;
@@ -362,4 +373,125 @@ export class TikTokParser {
     }
     return result;
   }
+
+  /**
+   * Writes the downloaded slide images and audio to a temp dir and shells
+   * out to ffmpeg's concat demuxer to combine them into a single mp4.
+   */
+  private async composePhotoPostVideo(
+    imageFiles: Array<{ buffer: Buffer; contentType: string }>,
+    audioFile: { buffer: Buffer; contentType: string },
+    perImageSeconds: number,
+    width: number,
+    height: number,
+  ): Promise<Buffer> {
+    const workDir = await mkdtemp(join(tmpdir(), "tiktok-photopost-"));
+    try {
+      const imagePaths = await Promise.all(
+        imageFiles.map(async ({ buffer, contentType }, i) => {
+          const path = join(
+            workDir,
+            `img${String(i).padStart(3, "0")}${extensionFor(contentType, ".jpg")}`,
+          );
+          await writeFile(path, buffer);
+          return path;
+        }),
+      );
+      const audioPath = join(
+        workDir,
+        `audio${extensionFor(audioFile.contentType, ".m4a")}`,
+      );
+      await writeFile(audioPath, audioFile.buffer);
+
+      // The concat demuxer ignores the last entry's duration, so the final
+      // image is repeated once more to make its display time take effect.
+      const listLines: string[] = [];
+      for (const path of imagePaths) {
+        listLines.push(`file '${toFfmpegConcatPath(path)}'`);
+        listLines.push(`duration ${perImageSeconds.toFixed(3)}`);
+      }
+      listLines.push(
+        `file '${toFfmpegConcatPath(imagePaths[imagePaths.length - 1])}'`,
+      );
+      const listPath = join(workDir, "list.txt");
+      await writeFile(listPath, listLines.join("\n"));
+
+      const outputPath = join(workDir, "output.mp4");
+      await this.runFfmpeg([
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listPath,
+        "-i",
+        audioPath,
+        "-vf",
+        `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+        "-c:v",
+        "libx264",
+        "-c:a",
+        "aac",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-shortest",
+        outputPath,
+      ]);
+
+      return await readFile(outputPath);
+    } finally {
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  private async runFfmpeg(args: string[]): Promise<void> {
+    try {
+      await execFileAsync("ffmpeg", args, { maxBuffer: 1024 * 1024 * 64 });
+    } catch (err: any) {
+      if (err?.code === "ENOENT") {
+        throw new Error(
+          "ffmpeg is not installed or not on PATH -- required to compose photo-post slideshows",
+        );
+      }
+      throw new Error(`ffmpeg failed to compose photo post: ${err?.stderr ?? err?.message ?? err}`);
+    }
+  }
+}
+
+/** Fits width/height within a maxSide x maxSide box, rounded to even pixels. */
+function computeCanvas(
+  width: number,
+  height: number,
+  maxSide: number,
+): { width: number; height: number } {
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  const toEven = (n: number) => {
+    const r = Math.round(n);
+    return r % 2 === 0 ? r : r + 1;
+  };
+  return { width: toEven(width * scale), height: toEven(height * scale) };
+}
+
+const EXTENSION_BY_CONTENT_TYPE: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "audio/mp4": ".m4a",
+  "audio/mpeg": ".mp3",
+  "audio/aac": ".aac",
+};
+
+function extensionFor(contentType: string, fallback: string): string {
+  for (const [key, ext] of Object.entries(EXTENSION_BY_CONTENT_TYPE)) {
+    if (contentType.startsWith(key)) return ext;
+  }
+  return fallback;
+}
+
+/** Normalizes a filesystem path for use in an ffmpeg concat list entry. */
+function toFfmpegConcatPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/'/g, "'\\''");
 }
