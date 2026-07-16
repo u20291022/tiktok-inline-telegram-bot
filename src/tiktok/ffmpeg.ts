@@ -88,6 +88,10 @@ export async function composePhotoPostVideo(
       `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
       "-c:v",
       "libx264",
+      "-preset",
+      "veryfast",
+      "-tune",
+      "stillimage",
       "-c:a",
       "aac",
       "-pix_fmt",
@@ -95,6 +99,8 @@ export async function composePhotoPostVideo(
       "-movflags",
       "+faststart",
       "-shortest",
+      "-r",
+      "2",
       outputPath,
     ]);
 
