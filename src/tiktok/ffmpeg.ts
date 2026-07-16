@@ -63,6 +63,7 @@ export async function composePhotoPostVideo(
       `audio${extensionFor(audioFile.contentType, ".m4a")}`,
     );
     await writeFile(audioPath, audioFile.buffer);
+    timeLog("composePhotoPostVideo file writes", writeStart);
 
     // TikTok's music CDN serves both aac and mp3 despite a shared
     // content-type, so re-encode unless the source is confirmed aac already
@@ -72,49 +73,84 @@ export async function composePhotoPostVideo(
     const audioCodecArgs =
       audioCodec === "aac" ? ["-c:a", "copy"] : ["-c:a", "aac"];
 
-    // The concat demuxer ignores the last entry's duration, so the final
-    // image is repeated once more to make its display time take effect.
-    const listLines: string[] = [];
-    for (const path of imagePaths) {
-      listLines.push(`file '${toFfmpegConcatPath(path)}'`);
-      listLines.push(`duration ${perImageSeconds.toFixed(3)}`);
-    }
-    listLines.push(
-      `file '${toFfmpegConcatPath(imagePaths[imagePaths.length - 1])}'`,
-    );
-    const listPath = join(workDir, "list.txt");
-    await writeFile(listPath, listLines.join("\n"));
-    timeLog("composePhotoPostVideo file writes", writeStart);
-
+    const vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     const outputPath = join(workDir, "output.mp4");
-    await runFfmpeg([
-      "-y",
-      "-f",
-      "concat",
-      "-safe",
-      "0",
-      "-i",
-      listPath,
-      "-i",
-      audioPath,
-      "-vf",
-      `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-tune",
-      "stillimage",
-      ...audioCodecArgs,
-      "-pix_fmt",
-      "yuv420p",
-      "-movflags",
-      "+faststart",
-      "-shortest",
-      "-r",
-      outputFps.toFixed(4),
-      outputPath,
-    ]);
+
+    if (imagePaths.length === 1) {
+      // A single static image has no per-slide timing to encode -- looping
+      // it directly is simpler and cheaper than routing it through the
+      // concat demuxer for one entry.
+      await runFfmpeg([
+        "-y",
+        "-loop",
+        "1",
+        "-framerate",
+        outputFps.toFixed(4),
+        "-i",
+        imagePaths[0],
+        "-i",
+        audioPath,
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-tune",
+        "stillimage",
+        "-preset",
+        "ultrafast",
+        ...audioCodecArgs,
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-shortest",
+        "-fflags",
+        "+genpts",
+        outputPath,
+      ]);
+    } else {
+      // The concat demuxer ignores the last entry's duration, so the final
+      // image is repeated once more to make its display time take effect.
+      const listLines: string[] = [];
+      for (const path of imagePaths) {
+        listLines.push(`file '${toFfmpegConcatPath(path)}'`);
+        listLines.push(`duration ${perImageSeconds.toFixed(3)}`);
+      }
+      listLines.push(
+        `file '${toFfmpegConcatPath(imagePaths[imagePaths.length - 1])}'`,
+      );
+      const listPath = join(workDir, "list.txt");
+      await writeFile(listPath, listLines.join("\n"));
+
+      await runFfmpeg([
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listPath,
+        "-i",
+        audioPath,
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-tune",
+        "stillimage",
+        ...audioCodecArgs,
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-shortest",
+        "-r",
+        outputFps.toFixed(4),
+        outputPath,
+      ]);
+    }
 
     const buffer = await readFile(outputPath);
     timeLog("composePhotoPostVideo total", composeStart);
