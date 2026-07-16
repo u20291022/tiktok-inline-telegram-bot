@@ -29,6 +29,26 @@ function toFfmpegConcatPath(path: string): string {
 }
 
 /**
+ * Computes a rounding-safe (frame count, -t seconds) pair for a given
+ * target duration and fps. Rounding fps to 4 decimals for the ffmpeg CLI
+ * arg (e.g. 1/68 -> "0.0147") implies a frame period (1/0.0147 = 68.03s)
+ * that can land slightly *past* a -t bound set from the un-rounded
+ * duration (68.000s) -- when that happens the single frame never
+ * completes within the window and ffmpeg silently emits a video track
+ * with zero frames. -frames:v caps frame count directly (immune to that
+ * rounding), and -t is derived from the same rounded fps so it's always
+ * generous enough to contain every frame it's supposed to.
+ */
+function videoFrameBudget(
+  totalSeconds: number,
+  fps: number,
+): { frameCount: number; durationSeconds: number } {
+  const frameCount = Math.max(1, Math.round(totalSeconds * fps));
+  const durationSeconds = Math.max(totalSeconds, frameCount / fps) + 0.1;
+  return { frameCount, durationSeconds };
+}
+
+/**
  * Writes the downloaded slide images and audio to a temp dir and shells
  * out to ffmpeg's concat demuxer to combine them into a single mp4.
  */
@@ -48,6 +68,10 @@ export async function composePhotoPostVideo(
   // not max() or a long single-image display gets encoded at a needlessly
   // high framerate instead of the ~1 frame it actually needs.
   const outputFps = Math.min(0.33, 1 / perImageSeconds);
+  // The value actually passed to ffmpeg (4 decimals) -- used consistently
+  // for both the CLI arg and the frame-count/-t arithmetic below so they
+  // can never disagree with each other.
+  const roundedFps = Number(outputFps.toFixed(4));
   const workDir = await mkdtemp(join(tmpdir(), "tiktok-photopost-"));
   try {
     const writeStart = Date.now();
@@ -91,12 +115,16 @@ export async function composePhotoPostVideo(
       // A single static image has no per-slide timing to encode -- looping
       // it directly is simpler and cheaper than routing it through the
       // concat demuxer for one entry.
+      const { frameCount, durationSeconds } = videoFrameBudget(
+        perImageSeconds,
+        roundedFps,
+      );
       await runFfmpeg([
         "-y",
         "-loop",
         "1",
         "-framerate",
-        outputFps.toFixed(4),
+        roundedFps.toFixed(4),
         "-i",
         imagePaths[0],
         // Loops the audio indefinitely so -shortest trims it down to the
@@ -124,11 +152,12 @@ export async function composePhotoPostVideo(
         // The looped image (-loop 1) and looped audio (-stream_loop -1)
         // are now BOTH infinite streams, so -shortest alone has nothing
         // finite left to cut against and never stops -- -t gives ffmpeg an
-        // explicit, unambiguous end time (for a single image this equals
-        // perImageSeconds, since totalDuration === perImageSeconds when
-        // there's only one image).
+        // explicit, unambiguous end time. -frames:v guarantees at least
+        // one video frame gets emitted regardless (see videoFrameBudget).
         "-t",
-        perImageSeconds.toFixed(3),
+        durationSeconds.toFixed(3),
+        "-frames:v",
+        String(frameCount),
         "-fflags",
         "+genpts",
         // Production stderr showed libx264 auto-selecting threads=3 on this
@@ -141,6 +170,10 @@ export async function composePhotoPostVideo(
         outputPath,
       ]);
     } else {
+      const { frameCount, durationSeconds } = videoFrameBudget(
+        perImageSeconds * imagePaths.length,
+        roundedFps,
+      );
       // The concat demuxer ignores the last entry's duration, so the final
       // image is repeated once more to make its display time take effect.
       const listLines: string[] = [];
@@ -184,13 +217,16 @@ export async function composePhotoPostVideo(
         "-shortest",
         // The concat demuxer's per-image "duration" lines already bound the
         // video to a finite length, so -shortest against the now-looped
-        // audio is safe here in principle -- but -t is added defensively
-        // too, as an explicit backstop so this branch can never hang the
-        // way the single-image one just did in production.
+        // audio is safe here in principle -- but -t and -frames:v are added
+        // defensively too (see videoFrameBudget), as an explicit backstop
+        // so this branch can never hang or emit zero frames the way the
+        // single-image one just did in production.
         "-t",
-        (perImageSeconds * imagePaths.length).toFixed(3),
+        durationSeconds.toFixed(3),
+        "-frames:v",
+        String(frameCount),
         "-r",
-        outputFps.toFixed(4),
+        roundedFps.toFixed(4),
         // See the single-image branch above: only a couple dozen frames are
         // ever encoded here regardless of image count, so multi-threaded
         // libx264 just contends with the concurrent audio encode for CPU on
