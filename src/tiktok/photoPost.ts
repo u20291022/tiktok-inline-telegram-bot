@@ -1,5 +1,6 @@
 import type { HTTPResponse, Page } from "puppeteer";
 import { composePhotoPostVideo } from "./ffmpeg";
+import { DEBUG_TIMING, timeLog } from "./timing";
 import {
   NAV_TIMEOUT_MS,
   ParsedVideo,
@@ -57,12 +58,23 @@ export function createApiItemCapture(): {
  * downstream code (caching, Telegram upload) sees an ordinary ParsedVideo.
  */
 export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo> {
+  const parseStart = Date.now();
   const images: Array<{
     imageWidth: number;
     imageHeight: number;
     imageURL?: { urlList?: string[] };
   }> = item.imagePost.images;
 
+  if (DEBUG_TIMING) {
+    const sizes = images
+      .map((img) => `${img.imageWidth}x${img.imageHeight}`)
+      .join(",");
+    console.warn(
+      `[timing] photoPost item summary: images=${images.length} sizes=[${sizes}] musicDuration=${item.music?.duration}`,
+    );
+  }
+
+  const downloadStart = Date.now();
   const imageFiles: Array<{ buffer: Buffer; contentType: string }> = [];
   for (const image of images) {
     imageFiles.push(await downloadImageWithRetry(page, image));
@@ -76,6 +88,7 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
   // for videos, tagged Content-Type: video/mp4 despite carrying no video
   // stream, so both content-types are accepted here.
   const audioFile = await downloadMedia(page, audioUrl, ["audio/", "video/mp4"]);
+  timeLog("photoPost downloads (images+audio)", downloadStart);
 
   const musicDuration = Number(item.music?.duration ?? 0);
   const perImageSeconds =
@@ -94,6 +107,7 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
     PHOTO_POST_MAX_SIDE,
   );
 
+  const ffmpegStart = Date.now();
   const buffer = await composePhotoPostVideo(
     imageFiles,
     audioFile,
@@ -101,7 +115,9 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
     width,
     height,
   );
+  timeLog("photoPost composePhotoPostVideo (ffmpeg)", ffmpegStart);
 
+  timeLog("parsePhotoPost total", parseStart);
   return {
     id: String(item.id),
     author: String(item.author?.uniqueId ?? ""),
@@ -138,6 +154,7 @@ async function downloadMedia(
   url: string,
   contentTypePrefixes: string[],
 ): Promise<{ buffer: Buffer; contentType: string }> {
+  const start = Date.now();
   let result: { buffer: Buffer; contentType: string } | null = null;
   const onResponse = async (res: HTTPResponse) => {
     if (result) return;
@@ -177,10 +194,12 @@ async function downloadMedia(
   }
 
   if (!result) {
+    timeLog(`downloadMedia FAILED url=${url}`, start);
     throw new Error(
       `Failed to download media (${contentTypePrefixes.join("/")}) from ${url}`,
     );
   }
+  timeLog(`downloadMedia OK url=${url}`, start);
   return result;
 }
 

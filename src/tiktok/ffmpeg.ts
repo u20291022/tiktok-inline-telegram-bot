@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { timeLog } from "./timing";
 
 const execFileAsync = promisify(execFile);
 
@@ -38,8 +39,10 @@ export async function composePhotoPostVideo(
   width: number,
   height: number,
 ): Promise<Buffer> {
+  const composeStart = Date.now();
   const workDir = await mkdtemp(join(tmpdir(), "tiktok-photopost-"));
   try {
+    const writeStart = Date.now();
     const imagePaths = await Promise.all(
       imageFiles.map(async ({ buffer, contentType }, i) => {
         const path = join(
@@ -68,6 +71,7 @@ export async function composePhotoPostVideo(
     );
     const listPath = join(workDir, "list.txt");
     await writeFile(listPath, listLines.join("\n"));
+    timeLog("composePhotoPostVideo file writes", writeStart);
 
     const outputPath = join(workDir, "output.mp4");
     await runFfmpeg([
@@ -94,16 +98,21 @@ export async function composePhotoPostVideo(
       outputPath,
     ]);
 
-    return await readFile(outputPath);
+    const buffer = await readFile(outputPath);
+    timeLog("composePhotoPostVideo total", composeStart);
+    return buffer;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
 async function runFfmpeg(args: string[]): Promise<void> {
+  const start = Date.now();
   try {
     await execFileAsync("ffmpeg", args, { maxBuffer: 1024 * 1024 * 64 });
+    timeLog("runFfmpeg execFile", start);
   } catch (err: any) {
+    timeLog("runFfmpeg execFile FAILED", start);
     if (err?.code === "ENOENT") {
       throw new Error(
         "ffmpeg is not installed or not on PATH -- required to compose photo-post slideshows",

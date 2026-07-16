@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Telegraf } from "telegraf";
 import { setupBot } from "./bot";
 import { TikTokParser } from "./tiktok";
+import { logSystemInfo } from "./tiktok/timing";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
       );
     }
     console.log("[bot] mode: webhook");
+    logSystemInfo();
     console.log(
       `[bot] webhook url: ${domain.replace(/\/$/, "")}${path} -> 127.0.0.1:${port}`,
     );
@@ -52,6 +54,7 @@ async function main(): Promise<void> {
     );
   } else {
     console.log("[bot] mode: polling");
+    logSystemInfo();
     await bot.launch(() =>
       console.log(`[bot] polling started, @${bot.botInfo?.username} is up`),
     );

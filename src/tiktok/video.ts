@@ -1,6 +1,7 @@
 import type { HTTPResponse } from "puppeteer";
 import { BrowserPool, jitter } from "./browser";
 import { createApiItemCapture, parsePhotoPost } from "./photoPost";
+import { timeLog } from "./timing";
 import {
   API_ITEM_WAIT_MS,
   NAV_TIMEOUT_MS,
@@ -10,6 +11,7 @@ import {
 } from "./types";
 
 export async function doParse(pool: BrowserPool, url: string): Promise<ParsedVideo> {
+  const jobStart = Date.now();
   const page = await pool.acquirePage();
   // The detail page prefetches recommended/autoplay videos in the
   // background, so several video/mp4 responses may arrive. Key each by its
@@ -47,6 +49,7 @@ export async function doParse(pool: BrowserPool, url: string): Promise<ParsedVid
       // someone pasting a video URL cold.
       referer: "https://www.tiktok.com/",
     });
+    timeLog("page.goto resolved", jobStart);
 
     // Metadata is embedded in the page HTML regardless of the video request
     let item = await page.evaluate(() => {
@@ -64,6 +67,10 @@ export async function doParse(pool: BrowserPool, url: string): Promise<ParsedVid
       // arrives via a client-side XHR captured by apiItemCapture above,
       // which may not have landed yet, so give it a moment before giving up.
       item = (await apiItemCapture.wait(API_ITEM_WAIT_MS)) as typeof item;
+      timeLog(
+        `api-item-capture wait resolved (source: xhr-fallback, found: ${Boolean(item)})`,
+        jobStart,
+      );
     }
 
     if (!item) {
@@ -87,7 +94,12 @@ export async function doParse(pool: BrowserPool, url: string): Promise<ParsedVid
     }
 
     if (item.imagePost?.images?.length > 0) {
-      return await parsePhotoPost(item, page);
+      timeLog("before parsePhotoPost", jobStart);
+      const photoPostStart = Date.now();
+      const result = await parsePhotoPost(item, page);
+      timeLog("parsePhotoPost returned (total)", photoPostStart);
+      timeLog("doParse total", jobStart);
+      return result;
     }
 
     // The CDN URLs this video is actually served from, per its own metadata.
@@ -123,6 +135,7 @@ export async function doParse(pool: BrowserPool, url: string): Promise<ParsedVid
       throw new Error("Metadata resolved but no video response captured");
     }
 
+    timeLog("doParse total", jobStart);
     return {
       id: String(item.id),
       author: String(item.author?.uniqueId ?? ""),
@@ -132,6 +145,9 @@ export async function doParse(pool: BrowserPool, url: string): Promise<ParsedVid
       height: Number(item.video?.height ?? 0),
       buffer: videoBuffer,
     };
+  } catch (err) {
+    timeLog("doParse total (failed)", jobStart);
+    throw err;
   } finally {
     page.off("response", onVideoResponse);
     page.off("response", apiItemCapture.onResponse);
