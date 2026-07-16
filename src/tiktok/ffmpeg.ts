@@ -64,6 +64,14 @@ export async function composePhotoPostVideo(
     );
     await writeFile(audioPath, audioFile.buffer);
 
+    // TikTok's music CDN serves both aac and mp3 despite a shared
+    // content-type, so re-encode unless the source is confirmed aac already
+    // -- copying an mp3 stream into an mp4 container produces unplayable
+    // audio in most players.
+    const audioCodec = await detectAudioCodec(audioPath);
+    const audioCodecArgs =
+      audioCodec === "aac" ? ["-c:a", "copy"] : ["-c:a", "aac"];
+
     // The concat demuxer ignores the last entry's duration, so the final
     // image is repeated once more to make its display time take effect.
     const listLines: string[] = [];
@@ -97,8 +105,7 @@ export async function composePhotoPostVideo(
       "veryfast",
       "-tune",
       "stillimage",
-      "-c:a",
-      "aac",
+      ...audioCodecArgs,
       "-pix_fmt",
       "yuv420p",
       "-movflags",
@@ -114,6 +121,29 @@ export async function composePhotoPostVideo(
     return buffer;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Returns the audio stream's codec name (e.g. "aac", "mp3"), or null if ffprobe fails/finds none. */
+async function detectAudioCodec(audioPath: string): Promise<string | null> {
+  const start = Date.now();
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "a:0",
+      "-show_entries",
+      "stream=codec_name",
+      "-of",
+      "csv=p=0",
+      audioPath,
+    ]);
+    timeLog("ffprobe audio codec detection", start);
+    return stdout.trim() || null;
+  } catch {
+    timeLog("ffprobe audio codec detection FAILED", start);
+    return null;
   }
 }
 
