@@ -114,8 +114,13 @@ export async function composePhotoPostVideo(
         "-shortest",
         "-fflags",
         "+genpts",
+        // Production stderr showed libx264 auto-selecting threads=3 on this
+        // 2-vCPU box for what's only ~20 output frames -- multi-threading
+        // buys nothing there and the worker pool contends with the
+        // concurrently-running (single-threaded) aac audio encode, which is
+        // what actually dominates runtime for these long-audio posts.
         "-threads",
-        "0",
+        "1",
         outputPath,
       ]);
     } else {
@@ -158,8 +163,12 @@ export async function composePhotoPostVideo(
         "-shortest",
         "-r",
         outputFps.toFixed(4),
+        // See the single-image branch above: only a couple dozen frames are
+        // ever encoded here regardless of image count, so multi-threaded
+        // libx264 just contends with the concurrent audio encode for CPU on
+        // this 2-vCPU box instead of speeding anything up.
         "-threads",
-        "0",
+        "1",
         outputPath,
       ]);
     }
