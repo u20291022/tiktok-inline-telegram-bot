@@ -170,10 +170,15 @@ export async function composePhotoPostVideo(
         outputPath,
       ]);
     } else {
-      const { frameCount, durationSeconds } = videoFrameBudget(
-        perImageSeconds * imagePaths.length,
-        roundedFps,
-      );
+      // Unlike the single-image path, -frames:v/-r have no place here: this
+      // is a slideshow of distinct images, not one image sampled sparsely,
+      // so the minimum viable frame count is one per image regardless of
+      // outputFps. Confirmed in production that applying the single-image
+      // fps cap here silently dropped 12 of 17 images (-frames:v 5 kept
+      // only 5). The concat list's per-image "duration" lines already
+      // pace the video correctly on their own with no override needed.
+      const totalSeconds = perImageSeconds * imagePaths.length;
+      const durationSeconds = totalSeconds + 0.1;
       // The concat demuxer ignores the last entry's duration, so the final
       // image is repeated once more to make its display time take effect.
       const listLines: string[] = [];
@@ -217,17 +222,12 @@ export async function composePhotoPostVideo(
         "-shortest",
         // The concat demuxer's per-image "duration" lines already bound the
         // video to a finite length, so -shortest against the now-looped
-        // audio is safe here in principle -- but -t and -frames:v are added
-        // defensively too (see videoFrameBudget), as an explicit backstop
-        // so this branch can never hang or emit zero frames the way the
-        // single-image one just did in production.
+        // audio is safe here in principle -- but -t is added defensively
+        // too, as an explicit backstop so this branch can never hang the
+        // way the single-image one once did in production.
         "-t",
         durationSeconds.toFixed(3),
-        "-frames:v",
-        String(frameCount),
-        "-r",
-        roundedFps.toFixed(4),
-        // See the single-image branch above: only a couple dozen frames are
+        // See the single-image branch above: only a handful of frames are
         // ever encoded here regardless of image count, so multi-threaded
         // libx264 just contends with the concurrent audio encode for CPU on
         // this 2-vCPU box instead of speeding anything up.
