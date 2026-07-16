@@ -106,6 +106,8 @@ export async function composePhotoPostVideo(
         "-shortest",
         "-fflags",
         "+genpts",
+        "-threads",
+        "0",
         outputPath,
       ]);
     } else {
@@ -148,6 +150,8 @@ export async function composePhotoPostVideo(
         "-shortest",
         "-r",
         outputFps.toFixed(4),
+        "-threads",
+        "0",
         outputPath,
       ]);
     }
