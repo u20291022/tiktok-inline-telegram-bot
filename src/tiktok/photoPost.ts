@@ -77,7 +77,7 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
   const downloadStart = Date.now();
   const imageFiles: Array<{ buffer: Buffer; contentType: string }> = [];
   for (const image of images) {
-    imageFiles.push(await downloadImageWithRetry(page, image));
+    imageFiles.push(await downloadImageWithRetry(page, image, downloadStart));
   }
 
   const audioUrl = String(item.music?.playUrl ?? "");
@@ -87,7 +87,12 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
   // TikTok serves some music tracks through the same video CDN infra used
   // for videos, tagged Content-Type: video/mp4 despite carrying no video
   // stream, so both content-types are accepted here.
-  const audioFile = await downloadMedia(page, audioUrl, ["audio/", "video/mp4"]);
+  const audioFile = await downloadMedia(
+    page,
+    audioUrl,
+    ["audio/", "video/mp4"],
+    downloadStart,
+  );
   timeLog("photoPost downloads (images+audio)", downloadStart);
 
   const musicDuration = Number(item.music?.duration ?? 0);
@@ -133,14 +138,15 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
 async function downloadImageWithRetry(
   page: Page,
   image: { imageURL?: { urlList?: string[] } },
+  batchStart: number,
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const urls = image.imageURL?.urlList ?? [];
   if (urls.length === 0) throw new Error("Photo post image has no urlList");
   try {
-    return await downloadMedia(page, urls[0], ["image/"]);
+    return await downloadMedia(page, urls[0], ["image/"], batchStart);
   } catch (err) {
     if (!urls[1]) throw err;
-    return await downloadMedia(page, urls[1], ["image/"]);
+    return await downloadMedia(page, urls[1], ["image/"], batchStart);
   }
 }
 
@@ -153,8 +159,10 @@ async function downloadMedia(
   page: Page,
   url: string,
   contentTypePrefixes: string[],
+  batchStart: number,
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const start = Date.now();
+  const startOffsetMs = start - batchStart;
   let result: { buffer: Buffer; contentType: string } | null = null;
   const onResponse = async (res: HTTPResponse) => {
     if (result) return;
@@ -193,13 +201,22 @@ async function downloadMedia(
     page.off("response", onResponse);
   }
 
+  const endOffsetMs = Date.now() - batchStart;
   if (!result) {
-    timeLog(`downloadMedia FAILED url=${url}`, start);
+    if (DEBUG_TIMING) {
+      console.warn(
+        `[timing] downloadMedia FAILED url=${url} startOffsetMs=${startOffsetMs} endOffsetMs=${endOffsetMs} durationMs=${endOffsetMs - startOffsetMs}`,
+      );
+    }
     throw new Error(
       `Failed to download media (${contentTypePrefixes.join("/")}) from ${url}`,
     );
   }
-  timeLog(`downloadMedia OK url=${url}`, start);
+  if (DEBUG_TIMING) {
+    console.warn(
+      `[timing] downloadMedia OK url=${url} startOffsetMs=${startOffsetMs} endOffsetMs=${endOffsetMs} durationMs=${endOffsetMs - startOffsetMs}`,
+    );
+  }
   return result;
 }
 

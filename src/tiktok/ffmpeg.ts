@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { timeLog } from "./timing";
+import { DEBUG_TIMING, timeLog } from "./timing";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +75,14 @@ export async function composePhotoPostVideo(
 
     const vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     const outputPath = join(workDir, "output.mp4");
+
+    if (DEBUG_TIMING) {
+      console.warn(
+        `[timing] composePhotoPostVideo: images=${imagePaths.length} outputFps=${outputFps.toFixed(4)} branch=${
+          imagePaths.length === 1 ? "single-image" : "concat-demuxer"
+        }`,
+      );
+    }
 
     if (imagePaths.length === 1) {
       // A single static image has no per-slide timing to encode -- looping
@@ -189,11 +197,22 @@ async function detectAudioCodec(audioPath: string): Promise<string | null> {
 
 async function runFfmpeg(args: string[]): Promise<void> {
   const start = Date.now();
+  if (DEBUG_TIMING) {
+    console.warn(`[timing] runFfmpeg args: ${JSON.stringify(args)}`);
+  }
   try {
-    await execFileAsync("ffmpeg", args, { maxBuffer: 1024 * 1024 * 64 });
+    const { stderr } = await execFileAsync("ffmpeg", args, {
+      maxBuffer: 1024 * 1024 * 64,
+    });
     timeLog("runFfmpeg execFile", start);
+    if (DEBUG_TIMING) {
+      console.warn(`[timing] runFfmpeg stderr:\n${stderr}`);
+    }
   } catch (err: any) {
     timeLog("runFfmpeg execFile FAILED", start);
+    if (DEBUG_TIMING) {
+      console.warn(`[timing] runFfmpeg stderr (failed):\n${err?.stderr ?? ""}`);
+    }
     if (err?.code === "ENOENT") {
       throw new Error(
         "ffmpeg is not installed or not on PATH -- required to compose photo-post slideshows",
