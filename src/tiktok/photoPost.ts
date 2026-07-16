@@ -74,25 +74,29 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
     );
   }
 
-  const downloadStart = Date.now();
-  const imageFiles: Array<{ buffer: Buffer; contentType: string }> = [];
-  for (const image of images) {
-    imageFiles.push(await downloadImageWithRetry(page, image, downloadStart));
-  }
-
   const audioUrl = String(item.music?.playUrl ?? "");
   if (!audioUrl) {
     throw new Error("Photo post is missing item.music.playUrl");
   }
-  // TikTok serves some music tracks through the same video CDN infra used
-  // for videos, tagged Content-Type: video/mp4 despite carrying no video
-  // stream, so both content-types are accepted here.
-  const audioFile = await downloadMedia(
-    page,
-    audioUrl,
-    ["audio/", "video/mp4"],
-    downloadStart,
-  );
+
+  const downloadStart = Date.now();
+  // Images and the audio track are independent CDN fetches. Production
+  // DEBUG_TIMING offsets showed these downloaded one at a time (each
+  // startOffset landing right at the previous one's endOffset) despite no
+  // intentional serialization -- turns out this loop was never actually
+  // concurrent, which is why a 17-image post took ~12s total when the
+  // single slowest individual request only took ~3s. TikTok serves some
+  // music tracks through the same video CDN infra used for videos, tagged
+  // Content-Type: video/mp4 despite carrying no video stream, so both
+  // content-types are accepted here.
+  const [imageFiles, audioFile] = await Promise.all([
+    Promise.all(
+      images.map((image) =>
+        downloadImageWithRetry(page, image, downloadStart),
+      ),
+    ),
+    downloadMedia(page, audioUrl, ["audio/", "video/mp4"], downloadStart),
+  ]);
   timeLog("photoPost downloads (images+audio)", downloadStart);
 
   const musicDuration = Number(item.music?.duration ?? 0);
