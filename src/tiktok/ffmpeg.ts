@@ -99,6 +99,12 @@ export async function composePhotoPostVideo(
         outputFps.toFixed(4),
         "-i",
         imagePaths[0],
+        // Loops the audio indefinitely so -shortest trims it down to the
+        // video's full intended length, instead of the video getting cut
+        // short whenever the display-time floor/fallback makes the images'
+        // total duration longer than the actual audio track.
+        "-stream_loop",
+        "-1",
         "-i",
         audioPath,
         "-vf",
@@ -148,6 +154,10 @@ export async function composePhotoPostVideo(
         "0",
         "-i",
         listPath,
+        // See the single-image branch above: loop the audio so -shortest
+        // trims it to the video's length rather than the reverse.
+        "-stream_loop",
+        "-1",
         "-i",
         audioPath,
         "-vf",
