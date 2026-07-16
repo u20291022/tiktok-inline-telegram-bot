@@ -97,8 +97,15 @@ export async function composePhotoPostVideo(
     // -- copying an mp3 stream into an mp4 container produces unplayable
     // audio in most players.
     const audioCodec = await detectAudioCodec(audioPath);
+    // Production stderr showed the mp3->aac transcode running at only
+    // 3.9x realtime, dominating total encode time once the video side is
+    // cheap -- -aac_coder fast trades some quality for speed in ffmpeg's
+    // native AAC encoder, with no container/compatibility implications
+    // (unlike -c:a copy, which isn't safe for mp3-in-mp4 playback).
     const audioCodecArgs =
-      audioCodec === "aac" ? ["-c:a", "copy"] : ["-c:a", "aac"];
+      audioCodec === "aac"
+        ? ["-c:a", "copy"]
+        : ["-c:a", "aac", "-aac_coder", "fast"];
 
     const vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     const outputPath = join(workDir, "output.mp4");
