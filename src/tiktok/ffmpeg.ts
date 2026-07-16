@@ -121,6 +121,14 @@ export async function composePhotoPostVideo(
         "-movflags",
         "+faststart",
         "-shortest",
+        // The looped image (-loop 1) and looped audio (-stream_loop -1)
+        // are now BOTH infinite streams, so -shortest alone has nothing
+        // finite left to cut against and never stops -- -t gives ffmpeg an
+        // explicit, unambiguous end time (for a single image this equals
+        // perImageSeconds, since totalDuration === perImageSeconds when
+        // there's only one image).
+        "-t",
+        perImageSeconds.toFixed(3),
         "-fflags",
         "+genpts",
         // Production stderr showed libx264 auto-selecting threads=3 on this
@@ -174,6 +182,13 @@ export async function composePhotoPostVideo(
         "-movflags",
         "+faststart",
         "-shortest",
+        // The concat demuxer's per-image "duration" lines already bound the
+        // video to a finite length, so -shortest against the now-looped
+        // audio is safe here in principle -- but -t is added defensively
+        // too, as an explicit backstop so this branch can never hang the
+        // way the single-image one just did in production.
+        "-t",
+        (perImageSeconds * imagePaths.length).toFixed(3),
         "-r",
         outputFps.toFixed(4),
         // See the single-image branch above: only a couple dozen frames are
