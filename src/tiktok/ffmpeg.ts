@@ -42,9 +42,12 @@ export async function composePhotoPostVideo(
   const composeStart = Date.now();
   // Aim for roughly one encoded frame per image: perImageSeconds already
   // accounts for the fallback-duration case (never 0), so 1/perImageSeconds
-  // is always finite. Floored at 0.33fps (1 frame/3s) so very long
-  // single-image displays still stay seekable/compatible in players.
-  const outputFps = Math.max(0.33, 1 / perImageSeconds);
+  // is always finite. Capped at 0.33fps (min 3s/image) -- perImageSeconds
+  // is bounded from below by that same 3s floor, and bounding a duration
+  // from below bounds its reciprocal fps from above, so this must be min()
+  // not max() or a long single-image display gets encoded at a needlessly
+  // high framerate instead of the ~1 frame it actually needs.
+  const outputFps = Math.min(0.33, 1 / perImageSeconds);
   const workDir = await mkdtemp(join(tmpdir(), "tiktok-photopost-"));
   try {
     const writeStart = Date.now();
