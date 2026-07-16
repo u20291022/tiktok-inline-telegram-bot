@@ -232,6 +232,11 @@ async function detectAudioCodec(audioPath: string): Promise<string | null> {
   }
 }
 
+// Belt-and-suspenders against another infinite-encode bug like the
+// -stream_loop one: SIGTERMs ffmpeg instead of hanging forever and
+// permanently tying up a browser-pool page slot.
+const FFMPEG_TIMEOUT_MS = 120_000;
+
 async function runFfmpeg(args: string[]): Promise<void> {
   const start = Date.now();
   if (DEBUG_TIMING) {
@@ -240,6 +245,7 @@ async function runFfmpeg(args: string[]): Promise<void> {
   try {
     const { stderr } = await execFileAsync("ffmpeg", args, {
       maxBuffer: 1024 * 1024 * 64,
+      timeout: FFMPEG_TIMEOUT_MS,
     });
     timeLog("runFfmpeg execFile", start);
     if (DEBUG_TIMING) {
