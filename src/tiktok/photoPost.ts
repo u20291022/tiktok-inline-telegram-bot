@@ -4,8 +4,8 @@ import { DEBUG_TIMING, timeLog } from "./timing";
 import {
   NAV_TIMEOUT_MS,
   ParsedVideo,
-  PHOTO_POST_FALLBACK_SECONDS_PER_IMAGE,
   PHOTO_POST_MAX_SIDE,
+  PHOTO_POST_MIN_SECONDS_PER_IMAGE,
 } from "./types";
 
 /**
@@ -100,14 +100,14 @@ export async function parsePhotoPost(item: any, page: Page): Promise<ParsedVideo
   timeLog("photoPost downloads (images+audio)", downloadStart);
 
   const musicDuration = Number(item.music?.duration ?? 0);
-  const perImageSeconds =
-    musicDuration > 0
-      ? musicDuration / images.length
-      : PHOTO_POST_FALLBACK_SECONDS_PER_IMAGE;
-  const totalDuration =
-    musicDuration > 0
-      ? musicDuration
-      : images.length * PHOTO_POST_FALLBACK_SECONDS_PER_IMAGE;
+  // Never show an image for less than the minimum, even if that makes the
+  // video longer than the actual music track -- composePhotoPostVideo loops
+  // the audio to cover the difference rather than speeding images up to fit.
+  const perImageSeconds = Math.max(
+    PHOTO_POST_MIN_SECONDS_PER_IMAGE,
+    musicDuration > 0 ? musicDuration / images.length : 0,
+  );
+  const totalDuration = images.length * perImageSeconds;
 
   const firstImage = images[0];
   const { width, height } = computeCanvas(
