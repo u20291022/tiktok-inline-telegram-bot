@@ -155,11 +155,35 @@ async function downloadImageWithRetry(
 }
 
 /**
+ * Wraps downloadMediaOnce with a single same-URL retry after a short delay.
+ * Production logs showed an occasional isolated download hang the full
+ * NAV_TIMEOUT_MS and fail even though the same CDN endpoint succeeded
+ * quickly moments before/after -- a transient hiccup, not a systemic
+ * failure, so one retry before giving up is worth it.
+ */
+async function downloadMedia(
+  page: Page,
+  url: string,
+  contentTypePrefixes: string[],
+  batchStart: number,
+): Promise<{ buffer: Buffer; contentType: string }> {
+  try {
+    return await downloadMediaOnce(page, url, contentTypePrefixes, batchStart);
+  } catch {
+    if (DEBUG_TIMING) {
+      console.warn(`[timing] downloadMedia retrying after failure url=${url}`);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+    return await downloadMediaOnce(page, url, contentTypePrefixes, batchStart);
+  }
+}
+
+/**
  * Navigates the page directly to a media URL and captures the response
  * body, the same Chromium-in-the-loop trick used for video/mp4 captures --
  * these CDN URLs sit behind the same Akamai TLS fingerprinting.
  */
-async function downloadMedia(
+async function downloadMediaOnce(
   page: Page,
   url: string,
   contentTypePrefixes: string[],
