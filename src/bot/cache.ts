@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { User } from "telegraf/types";
 import { escapeHtml } from "../messages";
 import { ParsedVideo } from "../tiktok";
 
@@ -11,6 +12,17 @@ export interface CacheEntry {
 
 // video url / video id -> uploaded telegram file_id + prebuilt caption parts
 export const cache = new Map<string, CacheEntry>();
+
+export interface RetryContext {
+  url: string;
+  isVideoMessage: boolean;
+  from: User;
+}
+
+// inline_message_id -> what's needed to retry a failed delivery. Callback
+// queries on inline messages only carry inline_message_id (no message
+// object), so this is the only way to recover the original url/kind/user.
+export const retryContext = new Map<string, RetryContext>();
 
 // The prefix encodes what kind of message the result sends ("video:" for a
 // cached video, "text:" for the text placeholder). Telegram echoes the id

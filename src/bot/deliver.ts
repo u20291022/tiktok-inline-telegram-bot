@@ -2,7 +2,7 @@ import { Input, Telegram, TelegramError } from "telegraf";
 import type { User } from "telegraf/types";
 import { messages, pickLang } from "../messages";
 import { TikTokParser, VideoUnavailableError } from "../tiktok";
-import { buildCacheEntry, cache, videoCaption } from "./cache";
+import { buildCacheEntry, cache, retryContext, videoCaption } from "./cache";
 
 export async function deliverVideo(
   telegram: Telegram,
@@ -14,6 +14,7 @@ export async function deliverVideo(
   isVideoMessage: boolean,
 ): Promise<void> {
   const m = messages[pickLang(from.language_code)];
+  retryContext.set(inlineMessageId, { url, isVideoMessage, from });
 
   try {
     let entry = cache.get(url);
@@ -68,6 +69,7 @@ export async function deliverVideo(
         },
       },
     );
+    retryContext.delete(inlineMessageId);
   } catch (err) {
     if (
       err instanceof TelegramError &&
@@ -76,6 +78,7 @@ export async function deliverVideo(
       // The message already shows exactly this content (e.g. a cached
       // video whose loading edit didn't land) -- that's success, not
       // something to overwrite with an error text.
+      retryContext.delete(inlineMessageId);
       return;
     }
     console.error(`[bot] failed to deliver ${url}:`, err);
@@ -89,16 +92,24 @@ export async function deliverVideo(
     // The media edit is the last step above, so on error the message is
     // still whatever was originally sent: a video (cached result) with a
     // caption to edit, or the plain text placeholder.
+    const errorReplyMarkup = {
+      inline_keyboard: [
+        [{ text: m.openInTikTok, url }],
+        [{ text: m.retry, callback_data: "retry" }],
+      ],
+    };
     if (isVideoMessage) {
       await telegram
         .editMessageCaption(undefined, undefined, inlineMessageId, text, {
           parse_mode: "HTML",
+          reply_markup: errorReplyMarkup,
         })
         .catch(() => {});
     } else {
       await telegram
         .editMessageText(undefined, undefined, inlineMessageId, text, {
           parse_mode: "HTML",
+          reply_markup: errorReplyMarkup,
         })
         .catch(() => {});
     }

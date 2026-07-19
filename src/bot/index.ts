@@ -1,7 +1,7 @@
 import { Telegraf } from "telegraf";
 import { messages, pickLang } from "../messages";
 import { extractTikTokUrl, TikTokParser } from "../tiktok";
-import { cache, resultId, videoCaption } from "./cache";
+import { cache, resultId, retryContext, videoCaption } from "./cache";
 import { deliverVideo } from "./deliver";
 
 export function setupBot(bot: Telegraf, parser: TikTokParser): void {
@@ -126,6 +126,54 @@ export function setupBot(bot: Telegraf, parser: TikTokParser): void {
       parser,
       url,
       inline_message_id,
+      from,
+      ctx.botInfo.username,
+      isVideoMessage,
+    );
+  });
+
+  bot.on("callback_query", async (ctx) => {
+    const cq = ctx.callbackQuery;
+    if (!("data" in cq) || cq.data !== "retry") return;
+
+    const inlineMessageId = cq.inline_message_id;
+    const retry = inlineMessageId && retryContext.get(inlineMessageId);
+    if (!retry) {
+      await ctx.answerCbQuery().catch(() => {});
+      return;
+    }
+
+    const { url, isVideoMessage, from } = retry;
+    const m = messages[pickLang(from.language_code)];
+    await ctx.answerCbQuery().catch(() => {});
+
+    // Same loading edit as chosen_inline_result: drop the retry button and
+    // go back to the plain "Open in TikTok" markup while re-parsing.
+    if (isVideoMessage) {
+      await ctx
+        .editMessageCaption(m.loadingCaption, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[{ text: m.openInTikTok, url }]],
+          },
+        })
+        .catch(() => {});
+    } else {
+      await ctx
+        .editMessageText(m.loadingCaption, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[{ text: m.openInTikTok, url }]],
+          },
+        })
+        .catch(() => {});
+    }
+
+    void deliverVideo(
+      ctx.telegram,
+      parser,
+      url,
+      inlineMessageId,
       from,
       ctx.botInfo.username,
       isVideoMessage,

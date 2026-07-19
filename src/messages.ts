@@ -33,6 +33,7 @@ export const messages: Record<
     loadingCaptionWithoutEmoji: string;
     doneCaption: string;
     openInTikTok: string;
+    retry: string;
     errorUnavailable: string;
     errorParse: string;
     errorNeedStart: (botUsername: string) => string;
@@ -54,6 +55,7 @@ export const messages: Record<
     loadingCaptionWithoutEmoji: `Loading video, it will appear here in a few seconds…`,
     doneCaption: `${emoji(EMOJI.success, "🙌")} Here's your video!`,
     openInTikTok: "Open in TikTok",
+    retry: "🔄 Retry",
     errorUnavailable: `${emoji(EMOJI.error, "❌")} Couldn't get this video. It may be private, deleted or region-locked.`,
     errorParse: `${emoji(EMOJI.error, "❌")} Failed to download this video. Please try again in a minute.`,
     errorNeedStart: (botUsername) =>
@@ -75,6 +77,7 @@ export const messages: Record<
     loadingCaptionWithoutEmoji: `Загружаю видео, оно появится здесь через несколько секунд…`,
     doneCaption: `${emoji(EMOJI.success, "🙌")} Ваше видео готово!`,
     openInTikTok: "Открыть в TikTok",
+    retry: "🔄 Повторить",
     errorUnavailable: `${emoji(EMOJI.error, "❌")} Не удалось получить это видео. Возможно, оно приватное, удалено или недоступно в регионе.`,
     errorParse: `${emoji(EMOJI.error, "❌")} Не удалось скачать это видео. Попробуйте ещё раз через минуту.`,
     errorNeedStart: (botUsername) =>
