@@ -1,7 +1,12 @@
 import type { Browser, Page } from "puppeteer";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { NAV_TIMEOUT_MS, POOL_SIZE } from "./types";
+import {
+  MAX_BROWSER_AGE_MS,
+  MAX_JOBS_PER_BROWSER,
+  NAV_TIMEOUT_MS,
+  POOL_SIZE,
+} from "./types";
 
 // TikTok's CDN sits behind Akamai bot detection that fingerprints the
 // TLS/HTTP2 handshake, so the video must be captured through a real
@@ -29,6 +34,8 @@ export class BrowserPool {
   private waiters: Array<(page: Page) => void> = [];
   private closed = false;
   private warmedUp = false;
+  private jobsSinceLaunch = 0;
+  private launchedAt = 0;
 
   async getBrowser(): Promise<Browser> {
     if (this.closed) throw new Error("Parser is shut down");
@@ -42,17 +49,39 @@ export class BrowserPool {
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
+          // Cut Chrome's background process/service footprint -- none of
+          // this touches the request/response path or the page's JS
+          // fingerprint, so it's invisible to TikTok's bot detection.
+          "--disable-gpu",
+          "--disable-extensions",
+          "--disable-default-apps",
+          "--disable-background-networking",
+          "--disable-background-timer-throttling",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
+          "--disable-breakpad",
+          "--disable-sync",
+          "--metrics-recording-only",
+          "--mute-audio",
+          "--no-first-run",
+          // TikTok's page pulls in trackers/ad iframes from many origins;
+          // under default site isolation each gets its own OS process, which
+          // is what multiplies "chrome" entries in `ps` per open tab.
+          "--disable-features=site-per-process,IsolateOrigins",
         ],
       });
       this.freePages = [];
       this.pagesCreated = 0;
       this.warmedUp = false;
+      this.jobsSinceLaunch = 0;
+      this.launchedAt = Date.now();
     }
     return this.browser;
   }
 
   async acquirePage(): Promise<Page> {
     const browser = await this.getBrowser();
+    this.jobsSinceLaunch++;
     const free = this.freePages.pop();
     if (free && !free.isClosed()) return free;
     if (this.pagesCreated < POOL_SIZE) {
@@ -72,8 +101,38 @@ export class BrowserPool {
       return;
     }
     const waiter = this.waiters.shift();
-    if (waiter) waiter(page);
-    else this.freePages.push(page);
+    if (waiter) {
+      waiter(page);
+      return;
+    }
+    this.freePages.push(page);
+    this.recycleIfDue();
+  }
+
+  /**
+   * Force-relaunches the browser once it's aged past MAX_JOBS_PER_BROWSER
+   * jobs or MAX_BROWSER_AGE_MS, but only while every page is checked back in
+   * -- recycling mid-parse would yank the page out from under an in-flight
+   * job.
+   */
+  private recycleIfDue(): void {
+    if (!this.browser || this.waiters.length > 0) return;
+    if (this.freePages.length !== this.pagesCreated) return;
+    const overJobs = this.jobsSinceLaunch >= MAX_JOBS_PER_BROWSER;
+    const overAge = Date.now() - this.launchedAt >= MAX_BROWSER_AGE_MS;
+    if (!overJobs && !overAge) return;
+
+    const browser = this.browser;
+    console.warn(
+      `[tiktok] recycling browser (jobs=${this.jobsSinceLaunch}, ageMs=${
+        Date.now() - this.launchedAt
+      })`,
+    );
+    this.browser = null;
+    this.freePages = [];
+    this.pagesCreated = 0;
+    this.warmedUp = false;
+    void browser.close().catch(() => {});
   }
 
   /**
