@@ -10,15 +10,15 @@ export interface ParsedVideo {
   buffer: Buffer;
 }
 
-export const POOL_SIZE = 2; // max videos parsed in parallel; the rest queue up
+export const POOL_SIZE = 1; // max videos parsed in parallel; the rest queue up
 // Headless Chrome's native memory footprint (V8 heap fragmentation, GPU/
 // compositor caches, disk cache under the persisted profile) grows over a
 // long-lived session in ways page navigation alone never reclaims, so the
 // browser is force-relaunched after this many jobs or this much wall time,
 // whichever comes first -- always while idle, so it never interrupts an
 // in-flight parse.
-export const MAX_JOBS_PER_BROWSER = 300;
-export const MAX_BROWSER_AGE_MS = 6 * 60 * 60 * 1000;
+export const MAX_JOBS_PER_BROWSER = 1;
+export const MAX_BROWSER_AGE_MS = 5 * 60 * 60 * 1000;
 export const NAV_TIMEOUT_MS = 30_000;
 export const VIDEO_WAIT_MS = 20_000;
 // Photo posts fetch their item data client-side after the page loads, so the
